@@ -10,3 +10,9 @@ __pycache__/
 .venv/
 uv.lock
 .pytest_cache/
+
+# Spend ledger written by preflight/budget.py -- local state, not a source file.
+.preflight-spend.json
+
+# Recorded LLM responses for replay mode. Committed intentionally (see M2).
+# .cassettes/ is NOT ignored.
