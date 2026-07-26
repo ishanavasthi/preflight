@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -56,7 +57,8 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 
 def synth_run(run_id: str, sha: str, *, scale: float = 1.0, hops: int = 1,
-              tools: int = 2, failures: int = 0, cases: list[str] | None = None) -> RunSummary:
+              tools: int = 2, failures: int = 0, dur: float = 180.0,
+              cases: list[str] | None = None) -> RunSummary:
     ids = cases or CASES
     return RunSummary(
         run_id=run_id,
@@ -68,7 +70,7 @@ def synth_run(run_id: str, sha: str, *, scale: float = 1.0, hops: int = 1,
                 input_tokens=int(600 * scale),
                 output_tokens=int(120 * scale),
                 cost_usd=round(0.0024 * scale, 8),
-                duration_ms=180.0 + 10 * i,
+                duration_ms=dur * (1 + 0.05 * i),
                 tool_calls=tools,
                 retrieval_hops=hops,
                 success=i >= failures,
@@ -102,6 +104,23 @@ def layer_a(cfg) -> None:
     rpt = differ.compare(base, one_fail, cfg)
     fail_rows = {d.key for d in rpt.deltas if d.breached}
     check("one newly failing case breaches success_rate", fail_rows == {"success_rate"}, str(fail_rows))
+
+    # Latency: real slowdown fires, sub-millisecond jitter does not.
+    slow = synth_run("run-slow", "1111", dur=400.0)
+    rpt = differ.compare(base, slow, cfg)
+    lat = next(d for d in rpt.deltas if d.key == "p95_latency_ms")
+    check("a 180ms -> 400ms slowdown breaches p95", lat.breached, f"{lat.pct_change:+.1f}%")
+
+    tiny_base = synth_run("run-t0", "2222", dur=0.1)
+    tiny_cand = synth_run("run-t1", "3333", dur=0.4)
+    rpt = differ.compare(tiny_base, tiny_cand, cfg)
+    lat = next(d for d in rpt.deltas if d.key == "p95_latency_ms")
+    check(
+        "0.1ms -> 0.4ms is +300% but under the noise floor",
+        not lat.breached,
+        f"{lat.pct_change:+.1f}% suppressed",
+    )
+    check("...and the suppression is noted", any("noise floor" in n for n in rpt.notes))
 
     # Zero baseline: nothing to divide by, so gate on the absolute rise.
     zero_hops = synth_run("run-z0", "ffff6666", hops=0)
@@ -151,16 +170,23 @@ def emit_run(cfg, sha: str, *, scale: float, hops: int, tools: int) -> tuple[str
     ctx = instrument.RunContext(run_id=run_id, commit_sha=sha)
 
     for i, case_id in enumerate(CASES):
-        with instrument.case_span(ctx, case_id):
+        with instrument.case_span(ctx, case_id) as case_sp:
             for h in range(hops):
                 with instrument.retrieval_span(ctx, name=f"kb-{h}", query=case_id):
-                    pass
+                    time.sleep(0.02)
             with instrument.llm_span(ctx, cfg, model=MODEL) as result:
+                # Sleep so the case span has a realistic wall time. Without it
+                # every duration is sub-millisecond and the p95 comparison is
+                # pure jitter -- which is exactly how the noise floor in
+                # differ.py came to exist.
+                time.sleep(0.05 * scale)
                 result.input_tokens = int((600 + 10 * i) * scale)
                 result.output_tokens = int((120 + 5 * i) * scale)
             for t in range(tools):
                 with instrument.tool_span(ctx, name=f"tool-{t}", call_id=f"{case_id}-{t}"):
-                    pass
+                    time.sleep(0.01)
+            # The attribute query.run_summary_typed reads to decide pass/fail.
+            case_sp.set_attribute("preflight.success", 1)
 
     otel.force_flush()
     return run_id, len(CASES) * (2 + hops + tools)
@@ -197,7 +223,30 @@ def layer_b(cfg) -> None:
     # Prove SHA -> most-recent-run resolution works against the live API.
     with SigNozClient(cfg) as client:
         ref = differ.resolve_run(client, bad_sha, lookback_minutes=60)
-    check("resolved a SHA to a run id via SigNoz", bool(ref.run_id), ref.run_id)
+        check("resolved a SHA to a run id via SigNoz", bool(ref.run_id), ref.run_id)
+
+        # M2's typed reader is the real path; the differ keeps its own reader as
+        # a fallback. If the two ever disagree the gate reports different
+        # numbers depending on which one ran, so check they agree.
+        typed, _ = differ.load_run(client, ref.run_id, bad_sha, lookback_minutes=60)
+        local, notes = differ.load_run(
+            client, ref.run_id, bad_sha, lookback_minutes=60, prefer_typed=False
+        )
+        check("the differ's fallback reader still works", bool(local.cases), notes[:1])
+        check(
+            "typed and fallback readers agree",
+            [
+                (c.case_id, c.total_tokens, round(c.cost_usd, 8), c.tool_calls,
+                 c.retrieval_hops, c.success)
+                for c in typed.cases
+            ]
+            == [
+                (c.case_id, c.total_tokens, round(c.cost_usd, 8), c.tool_calls,
+                 c.retrieval_hops, c.success)
+                for c in local.cases
+            ],
+        )
+        check("success rate reads back as 1.0", typed.metric("success_rate") == 1.0)
 
     rpt = differ.diff(base_sha, clean_sha, cfg, lookback_minutes=60)
     print("\n" + "-" * 70)

@@ -64,6 +64,10 @@ thresholds:
   # CI runner load and provider latency, neither of which the PR changed.
   # Loose on purpose -- latency here is a smoke signal, cost is the gate.
   p95_latency_ms_pct: 75
+  # ...and a percentage alone is not enough for a metric that can sit near zero.
+  # A case that takes 0.4ms and jitters to 1.2ms is +200% and means nothing.
+  # A rise must clear this many milliseconds as well as the percentage above.
+  p95_latency_ms_abs_floor_ms: 25
 
   # Trajectory. With a 6-case suite one stray extra tool call moves the mean by
   # ~8%, which is noise; a regression that changes how the agent plans moves

@@ -74,6 +74,16 @@ FALLBACK_THRESHOLDS: dict[str, float] = {
     "success_rate": 0.01,
 }
 
+# Absolute movement a metric must ALSO clear before a percentage breach counts.
+# Percentages of small numbers are noise amplifiers: an agent whose cases take
+# 0.4ms of wall time triples to 1.2ms on scheduler jitter alone and reports a
+# +200% "latency regression". Observed, not theorised -- it is what the first
+# end-to-end run of this gate did. Latency is the only metric with this problem
+# (cost and token counts have no floor-adjacent regime), so it is the only one
+# with a floor.
+FLOOR_KEYS: dict[str, str] = {"p95_latency_ms": "p95_latency_ms_abs_floor_ms"}
+FALLBACK_FLOORS: dict[str, float] = {"p95_latency_ms": 25.0}
+
 _EPS = 1e-9
 
 # Filter expressions qualify the field context explicitly. An unqualified
@@ -204,33 +214,30 @@ def _typed_reader(client: SigNozClient):
     it through is the difference between a correct diff and "baseline run has
     no cases".
     """
-    candidates = [getattr(client, "run_summary_typed", None)]
-    module_fn = getattr(query_mod, "run_summary_typed", None)
-    if callable(module_fn):
-        candidates += [
-            lambda rid, lb: module_fn(client, rid, lookback_minutes=lb),
-            lambda rid, lb: module_fn(client.cfg, rid, lookback_minutes=lb),
-        ]
-
-    method = candidates[0]
+    method = getattr(client, "run_summary_typed", None)
     if callable(method):
 
-        def _call(run_id: str, lookback: int) -> RunSummary | None:
+        def _bound(run_id: str, lookback: int) -> RunSummary | None:
             try:
                 return method(run_id, lookback_minutes=lookback)
             except TypeError:
                 return method(run_id)
 
-        return _call
+        return _bound
 
-    for fn in candidates[1:]:
-        def _call(run_id: str, lookback: int, _fn=fn) -> RunSummary | None:
-            try:
-                return _fn(run_id, lookback)
-            except TypeError:
-                return None
+    module_fn = getattr(query_mod, "run_summary_typed", None)
+    if callable(module_fn):
 
-        return _call
+        def _module(run_id: str, lookback: int) -> RunSummary | None:
+            for first in (client, client.cfg):
+                try:
+                    return module_fn(first, run_id, lookback_minutes=lookback)
+                except TypeError:
+                    continue
+            return None
+
+        return _module
+
     return None
 
 
@@ -307,7 +314,22 @@ def threshold_for(cfg: Config, key: str) -> float:
     return float(raw)
 
 
-def is_breach(key: str, baseline: float, candidate: float, threshold: float) -> bool:
+def noise_floor(cfg: Config, key: str) -> float:
+    """Minimum absolute rise before a percentage breach is believed."""
+    if key not in FLOOR_KEYS:
+        return 0.0
+    raw = (cfg.thresholds or {}).get(FLOOR_KEYS[key])
+    return FALLBACK_FLOORS[key] if raw is None else float(raw)
+
+
+def is_breach(
+    key: str,
+    baseline: float,
+    candidate: float,
+    threshold: float,
+    *,
+    floor: float = 0.0,
+) -> bool:
     """Does this metric movement cross the gate?
 
     `success_rate` breaches on an absolute *drop*; everything in
@@ -318,12 +340,16 @@ def is_breach(key: str, baseline: float, candidate: float, threshold: float) -> 
         # success_rate and anything else added later that is higher-is-better.
         return (baseline - candidate) > threshold + _EPS
 
+    rise = candidate - baseline
+    if rise <= floor + _EPS:
+        return False
+
     if baseline <= 0:
         # No division to do. Any movement away from zero is by definition an
-        # infinite percentage rise, so gate on movement itself.
-        return candidate > baseline + _EPS
+        # infinite percentage rise, so gate on the movement itself.
+        return True
 
-    return ((candidate - baseline) / baseline * 100.0) > threshold + _EPS
+    return (rise / baseline * 100.0) > threshold + _EPS
 
 
 def _intersect_cases(
@@ -401,8 +427,14 @@ def compare(
         b = base_run.metric(key)
         c = cand_run.metric(key)
         threshold = threshold_for(cfg, key)
-        breached = is_breach(key, b, c, threshold)
-        if key in HIGHER_IS_WORSE and b <= 0 and c > 0:
+        floor = noise_floor(cfg, key)
+        breached = is_breach(key, b, c, threshold, floor=floor)
+        if floor and not breached and c > b and b > 0 and (c - b) / b * 100.0 > threshold:
+            all_notes.append(
+                f"`{key}`: rose {(c - b) / b * 100.0:+.1f}% but only {c - b:.3g}ms in "
+                f"absolute terms, under the {floor:g}ms noise floor -- not gated."
+            )
+        if breached and key in HIGHER_IS_WORSE and b <= 0 and c > 0:
             all_notes.append(
                 f"`{key}`: baseline is zero, so percentage change is undefined; "
                 f"gated on the absolute rise to {c:.4g} instead."
