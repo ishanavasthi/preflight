@@ -4,6 +4,52 @@ Newest first.
 
 ---
 
+## 2026-07-27 — M2/M3/M4 integrated: three milestones built in parallel, verified together
+
+**What changed.** M2, M3, and M4 were built concurrently by three agents in one
+working tree rather than in sequence, then verified as a whole. Everything
+composes: `make ci-local BRANCH=seeded-regression` runs the real Action logic
+end to end — two git worktrees at the merge base and the branch head, the suite
+against each, then the gate — and exits non-zero with a rendered comment whose
+six SigNoz deep links all resolve (`route=200 waterfall=200`).
+
+**Parallelism worked because the seams were pinned first, not because the
+milestones were independent.** They aren't: M3 reads what M2 writes, M4 renders
+what M3 produces. What made concurrency safe was committing `contracts.py`
+(`RunSummary` → `DiffReport`) and a `report.py` stub with M4's real signatures
+*before* dispatching, plus explicit per-agent file ownership. Putting
+`RunSummary.metric()` in contracts rather than in the differ mattered most — the
+gate and the renderer cannot disagree about what "cost per task" means, because
+there is exactly one implementation.
+
+**The budget mechanism earned its keep.** A shared $1 of API credit across three
+agents is precisely where a "please be careful" instruction fails. A file-locked
+ledger that fails closed, plus cassette replay, meant only M2 ever spent: **$0.11
+of $1.00 across 69 calls**, with M3's 24-assertion suite and M4's full CI
+rehearsal both running at zero cost. Replay also made the demo reproducible,
+which retires the golden-suite non-determinism risk as a side effect.
+
+**Two operational gotchas that look like bugs and aren't:**
+
+- `make ci-local` returns **2**, not 1, when the gate breaches. GNU make exits 2
+  whenever a recipe fails, so the gate's own exit 1 is not propagated. The
+  workflow calls `preflight diff` directly and is unaffected — but anyone
+  reading `make`'s exit code as the verdict will misread it.
+- `preflight diff` with the same SHA on both sides exits **3**, not 0. That is a
+  deliberate guard: comparing a commit to itself is *cannot evaluate*, not *no
+  regression*, and the workflow treats exit 3 as a distinct failure from exit 1.
+  In real CI the merge base is never the PR head, so it never fires.
+
+**Takeaway.** The distinction that made this work is between *code* dependencies
+and *interface* dependencies. M2→M3→M4 is a hard code dependency, which is why
+sequential was the right call when nothing was pinned. Spending twenty minutes
+writing the interfaces down converted it into three independent problems. The
+cost of getting that wrong is high (three agents coding against a moving target),
+but the check is cheap: can each agent's output be described as a dataclass the
+next one imports? If yes, parallelise; if no, don't.
+
+---
+
 ## 2026-07-27 — M2 golden suite: real agent, cassette replay, metrics, logs
 
 **What changed.** `agent/reference.py` is now a real tool-calling loop against
