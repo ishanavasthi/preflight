@@ -41,10 +41,13 @@ MODEL = "claude-haiku-4-5-20251001"
 M1_MODEL = "fake-model-m1"
 MAX_TOKENS = 256
 # Harness ceiling, not a target. The baseline agent finishes every case in two
-# calls; the cap sits one above that so a regression can actually *show* a
-# longer trajectory instead of being silently clipped to look identical. A gate
-# that caps the thing it measures cannot see the thing it is measuring.
-MAX_MODEL_TURNS = 3
+# calls and never approaches this; the headroom exists so a regression can
+# actually *show* a longer trajectory instead of being silently clipped to look
+# identical to baseline. A gate that caps the thing it measures cannot see the
+# thing it is measuring -- with the cap at 3, the seeded regression came out at
+# +16% tokens, the "15%, not 3x" case BUILD_PLAN's risk register warns against.
+# Worst case is 5 calls x 6 cases on a re-record, which the budget absorbs.
+MAX_MODEL_TURNS = 5
 
 # --- The one line the seeded regression edits -----------------------------
 SYSTEM_PROMPT = (

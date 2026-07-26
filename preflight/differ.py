@@ -163,6 +163,7 @@ def load_run(
     commit_sha: str,
     *,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
+    prefer_typed: bool = True,
 ) -> tuple[RunSummary, list[str]]:
     """Read one run back out of SigNoz as a `RunSummary`.
 
@@ -173,9 +174,9 @@ def load_run(
     path was taken, because "trace links are missing" should be visible in the
     report rather than mysterious.
     """
-    typed = _typed_reader(client)
+    typed = _typed_reader(client) if prefer_typed else None
     if typed is not None:
-        summary = typed(run_id)
+        summary = typed(run_id, lookback_minutes)
         if summary is not None and summary.cases:
             if not summary.commit_sha:
                 summary.commit_sha = commit_sha
@@ -194,23 +195,40 @@ def _typed_reader(client: SigNozClient):
     """Bind M2's `run_summary_typed` however it ended up being exposed.
 
     Written before M2 landed, against a name agreed in the milestone contract
-    but not a call signature. Rather than guess wrong and crash the gate, try
-    the two shapes that make sense and fall through to the local reader.
+    but not a call signature -- so rather than guess wrong and crash the gate,
+    try the shapes that make sense and fall through to the local reader.
+
+    The lookback matters and is easy to lose: `resolve_run` may legitimately
+    find a baseline run from yesterday, and a reader defaulting to a 60-minute
+    window would then return zero cases for a run that plainly exists. Passing
+    it through is the difference between a correct diff and "baseline run has
+    no cases".
     """
-    method = getattr(client, "run_summary_typed", None)
+    candidates = [getattr(client, "run_summary_typed", None)]
+    module_fn = getattr(query_mod, "run_summary_typed", None)
+    if callable(module_fn):
+        candidates += [
+            lambda rid, lb: module_fn(client, rid, lookback_minutes=lb),
+            lambda rid, lb: module_fn(client.cfg, rid, lookback_minutes=lb),
+        ]
+
+    method = candidates[0]
     if callable(method):
-        return method
 
-    fn = getattr(query_mod, "run_summary_typed", None)
-    if callable(fn):
+        def _call(run_id: str, lookback: int) -> RunSummary | None:
+            try:
+                return method(run_id, lookback_minutes=lookback)
+            except TypeError:
+                return method(run_id)
 
-        def _call(run_id: str) -> RunSummary | None:
-            for args in ((run_id,), (client, run_id), (client.cfg, run_id)):
-                try:
-                    return fn(*args)
-                except TypeError:
-                    continue
-            return None
+        return _call
+
+    for fn in candidates[1:]:
+        def _call(run_id: str, lookback: int, _fn=fn) -> RunSummary | None:
+            try:
+                return _fn(run_id, lookback)
+            except TypeError:
+                return None
 
         return _call
     return None
@@ -231,7 +249,7 @@ def _run_summary_fallback(
     """
     end_ms = int(time.time() * 1000)
     start_ms = end_ms - lookback_minutes * 60_000
-    base = f"eval.run_id = '{run_id}'"
+    base = f"{_RUN_FIELD} = '{run_id}'"
 
     def by_case(aggs: list[Aggregation], extra: str = "") -> dict[str, dict[str, Any]]:
         rows = client.scalar(
@@ -252,18 +270,14 @@ def _run_summary_fallback(
             Aggregation("sum(gen_ai.usage.output_tokens)", "output_tokens"),
             Aggregation("sum(preflight.cost_usd)", "cost_usd"),
             Aggregation("sum(preflight.duration_ms)", "duration_ms"),
+            # 1/0 on the single case span, so the group sum is the verdict.
+            # Same reading as query.run_summary_typed -- the two paths must not
+            # disagree about whether a case passed.
+            Aggregation("sum(preflight.success)", "success"),
         ]
     )
-    tools = by_case([Aggregation("count()", "n")], " AND preflight.span_role = 'tool'")
-    hops = by_case(
-        [Aggregation("count()", "n")], " AND preflight.span_role = 'retrieval'"
-    )
-    try:
-        errors = by_case([Aggregation("count()", "n")], " AND has_error = true")
-    except SigNozError:
-        # Older deployments may not expose the intrinsic. Treat unknown as
-        # success rather than inventing failures.
-        errors = {}
+    tools = by_case([Aggregation("count()", "n")], f" AND {_ROLE_FIELD} = 'tool'")
+    hops = by_case([Aggregation("count()", "n")], f" AND {_ROLE_FIELD} = 'retrieval'")
 
     cases = [
         CaseSummary(
@@ -275,7 +289,7 @@ def _run_summary_fallback(
             duration_ms=float(row.get("duration_ms") or 0.0),
             tool_calls=int((tools.get(case_id) or {}).get("n") or 0),
             retrieval_hops=int((hops.get(case_id) or {}).get("n") or 0),
-            success=int((errors.get(case_id) or {}).get("n") or 0) == 0,
+            success=float(row.get("success") or 0.0) >= 1.0,
         )
         for case_id, row in sorted(totals.items())
     ]
