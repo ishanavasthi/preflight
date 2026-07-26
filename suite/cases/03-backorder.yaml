@@ -1,0 +1,4 @@
+id: backorder
+prompt: Order 8842 was hiking boots, SKU BOOT-11. Are they back in stock yet?
+tools: [lookup_order, check_inventory]
+expect_contains: stock

@@ -1,0 +1,99 @@
+{
+  "key": "e5349a27884d1d3946b35fd7e36cbba8",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Exchanges: Exchanges are accepted within 60 days if the replacement SKU is in stock. If the replacement is backordered, we issue a refund instead.\n\nCustomer question: I want to exchange the tent from order 8841 for another Ridgeline 2P, SKU TENT-2P. Is that possible?",
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Use the tools to check facts before answering. Answer in at most two sentences.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_018fV97sEeCaniY3NHroZSDb",
+        "input": {
+          "order_id": "8841"
+        },
+        "name": "lookup_order",
+        "type": "tool_use"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_014RELhh84jrWEMgoKcZGUNf",
+        "input": {
+          "sku": "TENT-2P"
+        },
+        "name": "check_inventory",
+        "type": "tool_use"
+      }
+    ],
+    "id": "msg_011CdRKdM2tJexMh4rkMDsnP",
+    "latency_ms": 1742.391,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 859,
+      "output_tokens": 98
+    }
+  }
+}

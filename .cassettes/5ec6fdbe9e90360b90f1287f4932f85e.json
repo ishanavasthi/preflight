@@ -1,0 +1,107 @@
+{
+  "key": "5ec6fdbe9e90360b90f1287f4932f85e",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Refund window: Refunds are available within 30 days of the ship date. Orders shipped more than 30 days ago are eligible for store credit only, not a refund.\n\nCustomer question: Order 8842 shipped 45 days ago and I want my money back. What are my options?",
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01VctCUYYgPt1Am15Dg6x1oA",
+            "input": {
+              "order_id": "8842"
+            },
+            "name": "lookup_order",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": "{\"order_id\": \"8842\", \"status\": \"delivered\", \"shipped_days_ago\": 45, \"carrier\": \"Northwind Freight\", \"items\": [{\"sku\": \"BOOT-11\", \"name\": \"Cascade Hiking Boot 11\", \"qty\": 1}], \"total_usd\": 165.0}",
+            "tool_use_id": "toolu_01VctCUYYgPt1Am15Dg6x1oA",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Use the tools to check facts before answering. Answer in at most two sentences.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "text": "Since your order shipped 45 days ago, it's outside our 30-day refund window, so a refund isn't available. However, you're eligible for store credit equal to your order total of $165.00, which you can use toward future purchases at Northwind Outfitters.",
+        "type": "text"
+      }
+    ],
+    "id": "msg_011CdRKdeQAFG9oGcwhexU2Q",
+    "latency_ms": 1968.917,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 1000,
+      "output_tokens": 68
+    }
+  }
+}

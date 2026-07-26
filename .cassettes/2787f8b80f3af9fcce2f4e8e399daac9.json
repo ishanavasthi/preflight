@@ -1,0 +1,88 @@
+{
+  "key": "2787f8b80f3af9fcce2f4e8e399daac9",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Refund window: Refunds are available within 30 days of the ship date. Orders shipped more than 30 days ago are eligible for store credit only, not a refund.\n\nCustomer question: Order 8842 shipped 45 days ago and I want my money back. What are my options?",
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Use the tools to check facts before answering. Answer in at most two sentences.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_01VctCUYYgPt1Am15Dg6x1oA",
+        "input": {
+          "order_id": "8842"
+        },
+        "name": "lookup_order",
+        "type": "tool_use"
+      }
+    ],
+    "id": "msg_011CdRKdZAtNMFmYWZFicDib",
+    "latency_ms": 992.11,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 853,
+      "output_tokens": 57
+    }
+  }
+}

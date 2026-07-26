@@ -1,0 +1,123 @@
+{
+  "key": "cd8072f45efe65b673f6fa5781401392",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Backorders: A SKU with zero on_hand and backordered=true restocks in 2-3 weeks. Customers may cancel a backordered line at any time for a full refund.\n\nCustomer question: Order 8842 was hiking boots, SKU BOOT-11. Are they back in stock yet?",
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_015iJ4ZLtfCGp6af19g4y93b",
+            "input": {
+              "order_id": "8842"
+            },
+            "name": "lookup_order",
+            "type": "tool_use"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01MZ1F7d7b1jNzqRBenkJ5CU",
+            "input": {
+              "sku": "BOOT-11"
+            },
+            "name": "check_inventory",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": "{\"order_id\": \"8842\", \"status\": \"delivered\", \"shipped_days_ago\": 45, \"carrier\": \"Northwind Freight\", \"items\": [{\"sku\": \"BOOT-11\", \"name\": \"Cascade Hiking Boot 11\", \"qty\": 1}], \"total_usd\": 165.0}",
+            "tool_use_id": "toolu_015iJ4ZLtfCGp6af19g4y93b",
+            "type": "tool_result"
+          },
+          {
+            "content": "{\"sku\": \"BOOT-11\", \"on_hand\": 0, \"warehouse\": \"SEA-1\", \"backordered\": true}",
+            "tool_use_id": "toolu_01MZ1F7d7b1jNzqRBenkJ5CU",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Use the tools to check facts before answering. Answer in at most two sentences.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "text": "Good news\u2014your order 8842 was already delivered 45 days ago! However, the BOOT-11 hiking boots are currently backordered with zero stock on hand and should restock in 2-3 weeks.",
+        "type": "text"
+      }
+    ],
+    "id": "msg_011CdRKdCkJp2tx5hMzeUHQ3",
+    "latency_ms": 1747.875,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 1129,
+      "output_tokens": 53
+    }
+  }
+}

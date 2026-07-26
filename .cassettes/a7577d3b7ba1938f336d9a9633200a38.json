@@ -1,0 +1,88 @@
+{
+  "key": "a7577d3b7ba1938f336d9a9633200a38",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Damaged goods: Damaged-on-arrival items are refunded in full regardless of the 30-day refund window. No return shipment is required.\n- Shipping times: Standard shipping is 5-7 business days. An order in the in_transit state has left the warehouse; processing means it has not shipped yet.\n\nCustomer question: The camp stove in order 8844 arrived damaged. What happens now?",
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Use the tools to check facts before answering. Answer in at most two sentences.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_0148xB7rBrUQaKMWfvRncHAn",
+        "input": {
+          "order_id": "8844"
+        },
+        "name": "lookup_order",
+        "type": "tool_use"
+      }
+    ],
+    "id": "msg_011CdRKdmur6mtowK6dVpqXd",
+    "latency_ms": 1041.987,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 878,
+      "output_tokens": 57
+    }
+  }
+}

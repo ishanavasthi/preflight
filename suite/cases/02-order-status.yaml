@@ -1,4 +1,4 @@
 id: order-status
-prompt: Where is order 8841?
+prompt: Where is order 8841 right now?
 tools: [lookup_order]
-expect_contains: order
+expect_contains: 8841

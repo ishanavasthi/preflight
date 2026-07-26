@@ -1,0 +1,99 @@
+{
+  "key": "687d225c4a7ff8277d8e3bfa7b6bb254",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Backorders: A SKU with zero on_hand and backordered=true restocks in 2-3 weeks. Customers may cancel a backordered line at any time for a full refund.\n\nCustomer question: Order 8842 was hiking boots, SKU BOOT-11. Are they back in stock yet?",
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Use the tools to check facts before answering. Answer in at most two sentences.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_015iJ4ZLtfCGp6af19g4y93b",
+        "input": {
+          "order_id": "8842"
+        },
+        "name": "lookup_order",
+        "type": "tool_use"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_01MZ1F7d7b1jNzqRBenkJ5CU",
+        "input": {
+          "sku": "BOOT-11"
+        },
+        "name": "check_inventory",
+        "type": "tool_use"
+      }
+    ],
+    "id": "msg_011CdRKd6ewfm6QHEcC2HpnY",
+    "latency_ms": 1432.236,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 858,
+      "output_tokens": 97
+    }
+  }
+}

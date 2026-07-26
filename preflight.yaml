@@ -31,15 +31,49 @@ models:
   claude-opus-5:
     input_per_mtok: 5.00
     output_per_mtok: 25.00
+  claude-haiku-4-5-20251001:
+    # What the reference agent actually runs on. The whole project has $1 of
+    # credit, so the suite is recorded once against Haiku and replayed from
+    # .cassettes/ thereafter -- see preflight/replay.py.
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
   fake-model-m1:
-    # Deterministic stub used by the M1 walking skeleton.
+    # Deterministic stub used by the M1 walking skeleton. Still reachable via
+    # PREFLIGHT_AGENT=stub.
     input_per_mtok: 2.00
     output_per_mtok: 10.00
 
-# Gate thresholds. Set well above observed run-to-run variance -- see the
-# "golden-suite non-determinism" risk in BUILD_PLAN.md. Populated in M3.
+# Gate thresholds -- the numbers `preflight diff` compares against.
+#
+# Set well above observed run-to-run variance, per the "golden-suite non-
+# determinism" risk in BUILD_PLAN.md. The plan also says to make the seeded
+# regression large (3x, not 15%), and these are sized for that: they catch a
+# real trajectory or cost change with a wide margin and stay quiet through
+# ordinary sampling noise. A gate that cries wolf gets switched off in a week.
+#
+# `*_pct` is a percentage RISE over baseline; success_rate is an ABSOLUTE drop,
+# because a percentage of a ratio reads badly in a PR comment.
 thresholds:
-  cost_usd_per_task_pct: 20
-  total_tokens_per_task_pct: 20
-  p95_latency_ms_pct: 50
-  success_rate_abs_drop: 0.0
+  # Cost and tokens are deterministic under cassette replay and vary only when
+  # the suite is re-recorded live. 25% is roughly 3x the drift seen between two
+  # live recordings, and far below the 200%+ a real prompt regression produces.
+  cost_usd_per_task_pct: 25
+  total_tokens_per_task_pct: 25
+
+  # Wall-clock, so this is the noisiest number in the table: it moves with
+  # CI runner load and provider latency, neither of which the PR changed.
+  # Loose on purpose -- latency here is a smoke signal, cost is the gate.
+  p95_latency_ms_pct: 75
+
+  # Trajectory. With a 6-case suite one stray extra tool call moves the mean by
+  # ~8%, which is noise; a regression that changes how the agent plans moves
+  # every case and lands well past 40%.
+  tool_calls_per_task_pct: 40
+
+  # Retrieval hops average ~1/case, so a single extra hop in one case is ~17%.
+  # The regression this metric exists to catch adds a hop to every case: +100%.
+  retrieval_hops_per_task_pct: 50
+
+  # Not a tolerance for failure -- a tolerance for float noise. One newly
+  # failing case in a 6-case suite is a drop of 0.167, sixteen times this.
+  success_rate_abs_drop: 0.01

@@ -20,16 +20,12 @@ from pathlib import Path
 import yaml
 
 from agent import reference
-from preflight import otel
+from preflight import instrument, otel
 from preflight.config import Config
 from preflight.instrument import RunContext
 from preflight.query import SigNozClient
 
 SUITE_DIR = Path(__file__).resolve().parent.parent / "suite" / "cases"
-
-# Spans emitted per case by the reference agent: 1 case + 1 retrieval + 2 llm
-# + one per tool. Used as the target for the ingest poller.
-_SPANS_PER_CASE_BASE = 4
 
 
 class IngestTimeout(RuntimeError):
@@ -72,11 +68,27 @@ def run_suite(cfg: Config, *, limit: int | None = None, run_id: str | None = Non
     ctx = RunContext(run_id=run_id, commit_sha=commit_sha)
 
     cases = load_cases(limit)
-    results = [reference.run_case(ctx, cfg, case) for case in cases]
+    results: list[reference.CaseResult] = []
+    for case in cases:
+        result = reference.run_case(ctx, cfg, case)
+        # Metrics on the same dimensions as the spans, using exactly the names
+        # pinned in contracts.py.
+        instrument.emit_case_metrics(
+            ctx,
+            case_id=result.case_id,
+            cost_usd=result.cost_usd,
+            tokens=result.input_tokens + result.output_tokens,
+            duration_ms=result.duration_ms,
+            tool_calls=len(result.tool_calls),
+            retrieval_hops=result.retrieval_hops,
+            success=result.success,
+        )
+        results.append(result)
 
-    expected = sum(
-        _SPANS_PER_CASE_BASE + len(c.get("tools", ["lookup"])) for c in cases
-    )
+    # The agent reports the spans it actually emitted. A real tool-calling loop
+    # has a variable trajectory, so a formula would be a guess -- and the whole
+    # point of the ingest poller is that its target is exact.
+    expected = sum(r.spans for r in results)
 
     otel.force_flush()
     return RunOutcome(

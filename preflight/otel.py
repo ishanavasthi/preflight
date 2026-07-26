@@ -9,10 +9,15 @@ library happens to emit this month.
 from __future__ import annotations
 
 import atexit
+import logging
 
 from opentelemetry import metrics, trace
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
@@ -25,11 +30,12 @@ INSTRUMENTATION_NAME = "preflight"
 
 _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
+_logger_provider: LoggerProvider | None = None
 
 
 def setup(cfg: Config, *, commit_sha: str) -> None:
-    """Install global tracer and meter providers. Idempotent per process."""
-    global _tracer_provider, _meter_provider
+    """Install global tracer, meter and logger providers. Idempotent per process."""
+    global _tracer_provider, _meter_provider, _logger_provider
     if _tracer_provider is not None:
         return
 
@@ -60,6 +66,24 @@ def setup(cfg: Config, *, commit_sha: str) -> None:
     )
     metrics.set_meter_provider(_meter_provider)
 
+    # Logs go to SigNoz over the same OTLP endpoint. The SDK's LoggingHandler
+    # stamps the active span's trace_id/span_id onto every record, so a log
+    # line the agent writes inside a case is one click from the span that
+    # produced it -- which is the whole "the offending span is one click away"
+    # promise, applied to logs as well as traces.
+    _logger_provider = LoggerProvider(resource=resource)
+    _logger_provider.add_log_record_processor(
+        BatchLogRecordProcessor(OTLPLogExporter(endpoint=f"{cfg.otlp_endpoint}/v1/logs"))
+    )
+    set_logger_provider(_logger_provider)
+
+    agent_log = logging.getLogger("preflight")
+    agent_log.setLevel(logging.INFO)
+    if not any(isinstance(h, LoggingHandler) for h in agent_log.handlers):
+        agent_log.addHandler(
+            LoggingHandler(level=logging.INFO, logger_provider=_logger_provider)
+        )
+
     atexit.register(shutdown)
 
 
@@ -81,13 +105,18 @@ def force_flush(timeout_millis: int = 30_000) -> None:
         _tracer_provider.force_flush(timeout_millis)
     if _meter_provider is not None:
         _meter_provider.force_flush(timeout_millis)
+    if _logger_provider is not None:
+        _logger_provider.force_flush(timeout_millis)
 
 
 def shutdown() -> None:
-    global _tracer_provider, _meter_provider
+    global _tracer_provider, _meter_provider, _logger_provider
     if _tracer_provider is not None:
         _tracer_provider.shutdown()
         _tracer_provider = None
     if _meter_provider is not None:
         _meter_provider.shutdown()
         _meter_provider = None
+    if _logger_provider is not None:
+        _logger_provider.shutdown()
+        _logger_provider = None

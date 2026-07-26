@@ -1,0 +1,4 @@
+id: damaged-item
+prompt: The camp stove in order 8844 arrived damaged. What happens now?
+tools: [lookup_order, policy_search]
+expect_contains: refund

@@ -17,7 +17,7 @@ from typing import Iterator
 
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from preflight import otel
+from preflight import contracts, otel
 from preflight.config import Config
 
 # --- GenAI semantic convention attribute names (Development stability) ------
@@ -148,6 +148,59 @@ def tool_span(ctx: RunContext, *, name: str, call_id: str) -> Iterator[object]:
             span.set_status(Status(StatusCode.ERROR, str(exc)))
             span.record_exception(exc)
             raise
+
+
+# --- run-level metrics ------------------------------------------------------
+# Names come from contracts.py and are pinned across milestones: M2 emits them,
+# M3 and the M5 dashboards read them. All six are histograms, including
+# `success` (recorded as 1.0 / 0.0) -- a counter would not survive the avg()
+# that turns per-case success into a run-level success rate, and one uniform
+# instrument type means one uniform query shape downstream.
+
+_HISTOGRAMS: dict[str, object] = {}
+
+_METRIC_UNITS = {
+    contracts.METRIC_CASE_COST_USD: ("usd", "Cost of one golden-suite case"),
+    contracts.METRIC_CASE_TOKENS: ("token", "Total tokens for one case"),
+    contracts.METRIC_CASE_DURATION_MS: ("ms", "Wall-clock duration of one case"),
+    contracts.METRIC_CASE_TOOL_CALLS: ("1", "Tool calls made in one case"),
+    contracts.METRIC_CASE_RETRIEVAL_HOPS: ("1", "Retrieval hops made in one case"),
+    contracts.METRIC_CASE_SUCCESS: ("1", "1 if the case met its expectation, else 0"),
+}
+
+
+def _histogram(name: str):
+    if name not in _HISTOGRAMS:
+        unit, description = _METRIC_UNITS[name]
+        _HISTOGRAMS[name] = otel.meter().create_histogram(
+            name, unit=unit, description=description
+        )
+    return _HISTOGRAMS[name]
+
+
+def emit_case_metrics(
+    ctx: RunContext,
+    *,
+    case_id: str,
+    cost_usd: float,
+    tokens: int,
+    duration_ms: float,
+    tool_calls: int,
+    retrieval_hops: int,
+    success: bool,
+) -> None:
+    """Record the run-level metrics for one case, on the gate's dimensions."""
+    attrs = {
+        EVAL_RUN_ID: ctx.run_id,
+        EVAL_CASE_ID: case_id,
+        VCS_COMMIT_SHA: ctx.commit_sha,
+    }
+    _histogram(contracts.METRIC_CASE_COST_USD).record(float(cost_usd), attrs)
+    _histogram(contracts.METRIC_CASE_TOKENS).record(float(tokens), attrs)
+    _histogram(contracts.METRIC_CASE_DURATION_MS).record(float(duration_ms), attrs)
+    _histogram(contracts.METRIC_CASE_TOOL_CALLS).record(float(tool_calls), attrs)
+    _histogram(contracts.METRIC_CASE_RETRIEVAL_HOPS).record(float(retrieval_hops), attrs)
+    _histogram(contracts.METRIC_CASE_SUCCESS).record(1.0 if success else 0.0, attrs)
 
 
 @contextmanager

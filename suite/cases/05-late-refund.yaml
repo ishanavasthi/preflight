@@ -1,0 +1,4 @@
+id: late-refund
+prompt: Order 8842 shipped 45 days ago and I want my money back. What are my options?
+tools: [lookup_order, policy_search]
+expect_contains: credit

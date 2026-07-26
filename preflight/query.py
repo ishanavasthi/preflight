@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 
 from preflight.config import Config
+from preflight.contracts import CaseSummary, RunSummary
 
 
 class SigNozError(RuntimeError):
@@ -80,16 +81,19 @@ class SigNozClient:
         *,
         aggregations: list[Aggregation],
         filter_expression: str,
-        group_by: list[str] | None = None,
+        group_by: list[str | tuple[str, str]] | None = None,
         start_ms: int,
         end_ms: int,
         signal: str = "traces",
     ) -> list[dict[str, Any]]:
         """Run a scalar (non-time-series) builder query and flatten the rows.
 
-        `group_by` names are treated as span attributes -- which is exactly the
-        question Unknown #1 in BUILD_PLAN.md asks. Returns a list of row dicts
-        mapping every group-by key and every aggregation alias to its value.
+        `group_by` entries are span attributes by default -- which is exactly
+        the question Unknown #1 in BUILD_PLAN.md asks. Pass a
+        `(name, field_context)` tuple to group by an intrinsic span field such
+        as `trace_id`, which lives in the `span` context rather than
+        `attribute`. Returns a list of row dicts mapping every group-by key and
+        every aggregation alias to its value.
         """
         body = {
             "schemaVersion": "v1",
@@ -111,6 +115,8 @@ class SigNozClient:
                             "filter": {"expression": filter_expression},
                             "groupBy": [
                                 {"name": g, "fieldContext": "attribute"}
+                                if isinstance(g, str)
+                                else {"name": g[0], "fieldContext": g[1]}
                                 for g in (group_by or [])
                             ],
                         },
@@ -157,6 +163,114 @@ class SigNozClient:
             start_ms=start_ms,
             end_ms=end_ms,
         )
+
+    # -- the M3 seam -------------------------------------------------------
+
+    def run_summary_typed(
+        self, run_id: str, *, lookback_minutes: int = 60
+    ) -> RunSummary:
+        """One whole run, as `contracts.RunSummary`. This is what M3 consumes.
+
+        `run_summary()` above returns raw rows and stays as-is for the CLI and
+        for debugging; this returns the pinned dataclass with every field the
+        gate needs populated, so the differ never has to know what a SigNoz row
+        looks like.
+
+        Four queries rather than one, because SigNoz aggregates over the rows a
+        filter selects and the counts we need come from *different* subsets of
+        spans: tool spans, retrieval spans, and everything. Conditional
+        aggregation would fold that into one round trip, but four small scalar
+        queries are ~100ms total and are obviously correct, which matters more
+        for the number that fails someone's PR.
+        """
+        end_ms = int(time.time() * 1000)
+        start_ms = end_ms - lookback_minutes * 60_000
+        where = f"eval.run_id = '{run_id}'"
+
+        totals = self.scalar(
+            aggregations=[
+                Aggregation("count()", "spans"),
+                Aggregation("sum(gen_ai.usage.input_tokens)", "input_tokens"),
+                Aggregation("sum(gen_ai.usage.output_tokens)", "output_tokens"),
+                Aggregation("sum(preflight.cost_usd)", "cost_usd"),
+                Aggregation("sum(preflight.duration_ms)", "duration_ms"),
+                Aggregation("sum(preflight.success)", "success"),
+            ],
+            filter_expression=where,
+            group_by=["eval.case_id", "vcs.commit_sha"],
+            start_ms=start_ms,
+            end_ms=end_ms,
+        )
+
+        def _role_counts(role: str, alias: str) -> dict[str, int]:
+            rows = self.scalar(
+                aggregations=[Aggregation("count()", alias)],
+                filter_expression=f"{where} AND preflight.span_role = '{role}'",
+                group_by=["eval.case_id"],
+                start_ms=start_ms,
+                end_ms=end_ms,
+            )
+            return {
+                str(r.get("eval.case_id", "")): int(r.get(alias) or 0) for r in rows
+            }
+
+        tool_calls = _role_counts("tool", "tool_calls")
+        retrieval_hops = _role_counts("retrieval", "retrieval_hops")
+        trace_ids = self._trace_ids(run_id, start_ms=start_ms, end_ms=end_ms)
+
+        commit_sha = ""
+        cases: list[CaseSummary] = []
+        for row in totals:
+            case_id = str(row.get("eval.case_id", ""))
+            if not case_id:
+                continue
+            commit_sha = commit_sha or str(row.get("vcs.commit_sha", "") or "")
+            cases.append(
+                CaseSummary(
+                    case_id=case_id,
+                    spans=int(row.get("spans") or 0),
+                    input_tokens=int(row.get("input_tokens") or 0),
+                    output_tokens=int(row.get("output_tokens") or 0),
+                    cost_usd=float(row.get("cost_usd") or 0.0),
+                    duration_ms=float(row.get("duration_ms") or 0.0),
+                    tool_calls=tool_calls.get(case_id, 0),
+                    retrieval_hops=retrieval_hops.get(case_id, 0),
+                    # `preflight.success` is 1/0 on the single case span, so the
+                    # group sum is the case's own verdict.
+                    success=float(row.get("success") or 0.0) >= 1.0,
+                    trace_id=trace_ids.get(case_id, ""),
+                )
+            )
+
+        cases.sort(key=lambda c: c.case_id)
+        return RunSummary(run_id=run_id, commit_sha=commit_sha, cases=cases)
+
+    def _trace_ids(
+        self, run_id: str, *, start_ms: int, end_ms: int
+    ) -> dict[str, str]:
+        """Map case_id -> trace_id, so the PR comment can deep-link the trace.
+
+        `trace_id` is an intrinsic span field, not an attribute, so it needs
+        `fieldContext: "span"`. Best-effort: a missing deep link degrades the
+        report, a raised exception would fail the gate for a cosmetic reason.
+        """
+        try:
+            rows = self.scalar(
+                aggregations=[Aggregation("count()", "spans")],
+                filter_expression=(
+                    f"eval.run_id = '{run_id}' AND preflight.span_role = 'case'"
+                ),
+                group_by=["eval.case_id", ("trace_id", "span")],
+                start_ms=start_ms,
+                end_ms=end_ms,
+            )
+        except SigNozError:
+            return {}
+        return {
+            str(r.get("eval.case_id", "")): str(r.get("trace_id", "") or "")
+            for r in rows
+            if r.get("eval.case_id")
+        }
 
 
 def _flatten_scalar(

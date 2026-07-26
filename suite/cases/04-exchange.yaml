@@ -1,0 +1,4 @@
+id: exchange
+prompt: I want to exchange the tent from order 8841 for another Ridgeline 2P, SKU TENT-2P. Is that possible?
+tools: [lookup_order, policy_search, check_inventory]
+expect_contains: exchange
