@@ -5,9 +5,9 @@
 | # | Milestone | Status |
 |---|---|---|
 | M1 | Walking skeleton — Foundry up, one instrumented trace, read back via query API | **Done** — check passed |
-| M2 | Golden suite + full instrumentation | Not started |
+| M2 | Golden suite + full instrumentation | **Done** — check passed (two SHAs, one query grouped by `vcs.commit_sha`, two rows with different token totals) |
 | M3 | Differ + gate | **Done** — check passed (exit 1 with the cost delta named, exit 0 on a clean re-run; regression proven with synthetic runs through real SigNoz, see DECISIONS.md) |
-| M4 | GitHub Action + PR comment (*demo complete here*) | Not started |
+| M4 | GitHub Action + PR comment (*demo complete here*) | **Built** — validated locally end to end (`make ci-local` exits 1, all 6 deep links resolve); awaiting the real PR, which the human opens |
 | M5 | Dashboards + alerts as code | Not started |
 | M6 | Diagnosis agent over MCP | Not started |
 | M7 | Ship — README, video, blog, submission form | Not started |
@@ -25,6 +25,34 @@ OTLP/HTTP exporter and a resource carrying `service.name` and `vcs.commit_sha`.
 `retrieval_span`, each stamping the eval dimensions. Cost is computed inside
 `llm_span` on exit from the price table, so `preflight.cost_usd` and the token
 attributes can never disagree.
+
+**Reference agent.** `agent/reference.py` is a real tool-calling loop against
+`claude-haiku-4-5-20251001` over the fake dataset in `agent/data.py`: one
+grounding retrieval hop, then up to five model turns (baseline uses two) with
+three tools — `lookup_order`, `policy_search`, `check_inventory`. `policy_search`
+nests a retrieval span, so it costs a hop. Six cases in `suite/cases/`, 5–13
+spans each, 32 spans per baseline run. The M1 deterministic stub is still
+reachable behind `PREFLIGHT_AGENT=stub` for testing telemetry without a model.
+
+**Record/replay cache.** `preflight/replay.py` keys each request by a hash of
+(model, system, messages, tools, max_tokens, temperature) and stores the
+response as JSON under `.cassettes/`, which is **committed on purpose**.
+`PREFLIGHT_REPLAY=1` — or a missing `ANTHROPIC_API_KEY` — replays and never
+calls the API; a miss in that mode raises `ReplayMiss` rather than spending.
+Cassettes also record the provider's wall time and replay it, so `p95_latency_ms`
+is a real reproducible number instead of sub-millisecond noise
+(`PREFLIGHT_FAST_REPLAY=1` skips the wait). On a miss with a key present, the
+call is gated by `preflight.budget.check()` and its actual cost recorded.
+
+**Metrics.** `instrument.emit_case_metrics()` records all six
+`contracts.METRIC_CASE_*` names on the `eval.run_id` / `eval.case_id` /
+`vcs.commit_sha` dimensions. All six are histograms — including `success`, as
+1.0/0.0 — so one query shape serves every metric and `avg()` yields the
+run-level success rate.
+
+**Logs.** `otel.py` installs a `LoggerProvider` with an OTLP exporter and
+attaches the SDK `LoggingHandler` to the `preflight` logger, so every line the
+agent writes carries the active span's `trace_id` and `span_id`.
 
 **Query layer.** `preflight/query.py` wraps `POST /api/v5/query_range` with a
 scalar builder-query helper supporting aggregations, filter expressions, and
@@ -57,15 +85,41 @@ render in CI as a broken agent.
 **Bootstrap.** `scripts/bootstrap_signoz.sh` creates the first admin user, mints
 an admin-scoped service-account key, verifies it, and writes `.env`.
 
+**PR comment.** `preflight/report.py` renders a `DiffReport` as the comment:
+pass/fail banner, a headline naming the breached metrics worst-first, the delta
+table, a "biggest mover" line pointing at the offending trace, and a collapsed
+per-case breakdown where every row deep-links to its own trace. The link format
+is `{base}/trace/{trace_id}[?spanId={span_id}]`, **verified against SigNoz
+v0.134.0 four ways** (router constant, the `spanId` query-param reader, the UI's
+own Copy-link handler, and the `/api/v4/traces/{id}/waterfall` API) — see
+DECISIONS.md. `PREFLIGHT_SIGNOZ_PUBLIC_URL` overrides the link host when the
+SigNoz CI queries is not the one a reviewer can open. `MARKER` is the anchor the
+Action's sticky-comment upsert greps for.
+
+**CI gate.** `.github/workflows/preflight.yml` runs on `pull_request`: forge
+SigNoz in-job from the committed `casting.yaml` (`pours/` is gitignored) →
+`docker compose up` → a separate 600s health poll → `bootstrap_signoz.sh` →
+baseline from `git merge-base origin/$GITHUB_BASE_REF HEAD` → suite on the merge
+base in a detached worktree and on the PR head → `preflight diff --format
+markdown --output report.md` → sticky comment upsert (`pull-requests: write`) →
+fail the check. `PREFLIGHT_REPLAY=1` throughout, so CI makes **zero** model API
+calls. Exit 2 and 3 are surfaced as "the gate could not run", never as a
+regression verdict.
+
+**Local rehearsal.** `make ci-local BRANCH=<branch>` runs the entire Action
+sequence on a laptop and exits with the gate's code; `make verify-links` proves
+the deep links resolve; `make lint-ci` runs actionlint + shellcheck.
+
 ## Integrations
 
 | Integration | Where | Notes |
 |---|---|---|
 | SigNoz query API v5 | `preflight/query.py` | Source of truth for the gate |
-| OTLP/HTTP | `preflight/otel.py` | Traces + metrics to `:4318` |
+| OTLP/HTTP | `preflight/otel.py` | Traces, metrics **and logs** to `:4318` |
 | Foundry | `casting.yaml` | Deployment reproducibility (Field Req 3) |
 | SigNoz MCP server | port 8000, enabled | Wired up; used in M5/M6 |
-| OpenRouter | M2 | Anthropic-shaped client with base-URL override |
+| Anthropic API | `preflight/replay.py` | `anthropic` SDK, `claude-haiku-4-5-20251001` only. Every call gated by `preflight/budget.py` against a $1 cap; total M2 spend $0.1123 / 69 calls |
+| Cassette replay | `.cassettes/` (committed) | 12 baseline + 21 on `seeded-regression`. Default execution path — CI and a fresh clone run the suite offline and free |
 | GitHub Actions | M4 | `gh` CLI authed as `ishanavasthi` |
 
 ## Attributes emitted
@@ -80,8 +134,15 @@ Preflight's own: `eval.run_id`, `eval.case_id`, `vcs.commit_sha`,
 
 ## Known gaps
 
-- Run-level **metrics** are wired but nothing emits them yet (M2).
-- **Logs with trace context** not started (M2).
-- SigNoz **trace deep-link URL format** still unresolved — to be copied from the
-  UI address bar when `report.py` is written (M4), not guessed.
-- The reference agent is a deterministic stub; real model calls land in M2.
+- **Metrics are emitted but not yet readable through the query API.** All six
+  `preflight.case.*` histograms land in ClickHouse with the right names and
+  labels, but SigNoz splits histograms into `.bucket` / `.count` / `.sum` /
+  `.min` / `.max` and registers only `.bucket` as `type = Histogram`. Every
+  `signal: "metrics"` query attempted through `/api/v5/query_range` returned
+  zero rows. Read-path shape only — the emit side is verified. Belongs to M5,
+  which builds dashboards through the SigNoz MCP server anyway. **The gate does
+  not depend on it:** M3 reads traces via `run_summary_typed`.
+- **Tool-call trajectory divergence** in the sequence sense is not implemented —
+  `tool_calls_per_task` counts calls, it does not notice a reordering. Say
+  "tool-call volume" in the submission.
+- `seeded-regression` is **not merged and must not be**. It exists for M4's PR.

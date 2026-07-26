@@ -4,6 +4,163 @@ Newest first.
 
 ---
 
+## 2026-07-27 — M2 golden suite: real agent, cassette replay, metrics, logs
+
+**What changed.** `agent/reference.py` is now a real tool-calling loop against
+`claude-haiku-4-5-20251001` over an in-repo fake dataset (`agent/data.py`):
+one grounding retrieval hop, then up to five model turns with three tools
+(`lookup_order` / `policy_search` / `check_inventory`). Six cases in
+`suite/cases/`, 5–13 spans each. Spans carry the full GenAI semconv set plus
+`preflight.cost_usd` from the price table; run-level metrics are emitted on
+`eval.run_id` / `eval.case_id` / `vcs.commit_sha` under the names pinned in
+`contracts.py`; logs export over OTLP with trace context attached.
+`query.run_summary_typed()` returns `contracts.RunSummary` — the M3 seam.
+Branch `seeded-regression` holds a one-line prompt edit worth +150% cost.
+
+**The whole thing runs on a record/replay cache.** `preflight/replay.py` keys
+each request by a hash of (model, system, messages, tools, max_tokens,
+temperature) and stores the response as JSON under `.cassettes/`, which is
+committed on purpose. `PREFLIGHT_REPLAY=1` — or simply no API key — replays and
+never calls out, so a fresh clone runs the full suite offline and for free. Two
+problems, one fix: the project has $1 of credit, and a gate whose numbers move
+between runs is not a gate.
+
+**Takeaway: a test double has to be faithful in whatever dimension you gate on,
+not just the obvious one.** The first cassette design replayed tokens and
+content perfectly and dropped latency on the floor — replayed cases finished in
+~0.2ms. Tokens and cost were exact, so the cache looked correct, and
+`p95_latency_ms` had quietly become a random number generator: ordinary
+0.2ms/0.5ms jitter is a +150% swing that trips any threshold anyone would pick.
+That is the "gate is flaky, so the team switches it off" failure in the risk
+register, arriving through the component built to make the gate *stable*. Fix
+was to record the provider's wall time in the cassette and sleep it on replay;
+p95 is now 3.19s baseline vs 8.54s regression — a real, reproducible signal.
+M3 independently hit the same zero-latency problem from the other side and added
+an absolute noise floor; both fixes are worth keeping.
+
+**Gotcha: the harness ceiling silently caps the signal it is supposed to
+measure.** With `MAX_MODEL_TURNS = 3`, the seeded regression came out at +16%
+tokens — precisely the "15%, not 3×" case BUILD_PLAN warns against — and the
+obvious read was "the prompt edit is too weak." It wasn't: the *cap* was
+truncating the trajectory, so a longer-running agent was being clipped back into
+looking like baseline. Raising the ceiling to 5 changed nothing for baseline
+(every case still terminates on `end_turn` in two calls, all twelve cassettes
+still hit) and let the regression show +130%. Check the instrument before
+concluding the effect is small.
+
+**Gotcha, and the most portable finding here: what inflates agent cost is
+serialisation, not verbosity.** Two attempts at the seeded regression asked the
+model to be more thorough — "enumerate every option", "check every relevant
+tool, one per step". Both landed at +16–18% tokens, because the model batches
+its tool calls into a single parallel turn: more tools, same number of turns,
+input context re-sent the same number of times. What actually moved the number
+was a **dependency chain** — call `policy_search`, then `lookup_order`, then
+`check_inventory` *for the SKU you found on that order* — where each tool's
+input requires the previous tool's output. That forces genuinely sequential
+turns, and each turn re-sends a growing transcript: +130% tokens, +133%
+retrieval hops, +150% cost. Worth remembering when reasoning about agent spend:
+turn count is the multiplier, output length is rounding error.
+
+**Gotcha: SigNoz explodes OTel histograms into suffixed series, and only
+`.bucket` is registered as queryable.** The six `preflight.case.*` histograms
+land in ClickHouse as `.bucket` / `.count` / `.sum` / `.min` / `.max`, with
+correct `eval.run_id` / `eval.case_id` / `vcs.commit_sha` labels — but
+`signoz_metrics.distributed_metadata` records only `.bucket` with
+`type = Histogram`. Every `signal: "metrics"` query I tried through
+`/api/v5/query_range` returned zero rows (base name, `.sum`, and `.bucket`;
+with and without `temporality: Cumulative`; several `spaceAggregation` values).
+The data is unambiguously there — verified in ClickHouse — so this is a read-path
+shape I did not crack, not a missing emit. Left for M5, which BUILD_PLAN already
+says to build through the SigNoz MCP server rather than by hand-rolling these
+payloads. **Nothing depends on it today:** the gate reads traces via
+`run_summary_typed`, which is fully verified end to end.
+
+**`temperature=0` on a golden suite.** Not for determinism at inference — it
+does not give that — but so that *re-recording* cassettes doesn't rewrite every
+expected answer and force the six `expect_contains` assertions to be re-tuned.
+
+**Process, learned the annoying way: `git add -A` in a shared working tree
+commits your teammates' work in progress.** Three agents share this checkout;
+my first M2 commit swept in M3's then-unfinished `differ.py`, `cli.py`, and
+`scripts/m3_check.py`. Nothing was lost and their files imported cleanly, so
+unwinding it would have risked more than leaving it — but the fix going forward
+is to stage explicit paths. Same lesson for branches: the `seeded-regression`
+work was done in a `git worktree` at /tmp rather than by checking the branch out
+here, which would have yanked the tree out from under two other agents mid-edit.
+
+**Spend: $0.1123 across 69 calls**, against a $1.00 cap and a $0.30 target —
+`preflight/budget.py` gated every one. Recording the six-case suite once costs
+$0.0151; the rest went on one probe, one re-record after adding latency and
+`temperature`, and three attempts at the seeded regression. Every subsequent run
+of the suite is free.
+
+---
+
+## 2026-07-27 — M4 landed: the PR comment, and the deep link that isn't a guess
+
+**What changed.** `preflight/report.py` is the real renderer: pass/fail banner,
+a headline naming the breached metrics worst-first, the delta table, a "biggest
+mover" line pointing straight at the offending trace, and a collapsed per-case
+breakdown where every row deep-links to its own trace in SigNoz.
+`.github/workflows/preflight.yml` forges SigNoz in-job from the committed
+`casting.yaml`, bootstraps credentials, resolves the baseline from
+`git merge-base`, runs the suite on the merge base *in a detached worktree* and
+on the PR head, gates, and upserts one sticky PR comment. `PREFLIGHT_REPLAY=1`
+throughout, so CI costs nothing and is deterministic.
+`scripts/report_sample.py` renders samples and verifies links; `make ci-local`
+rehearses the whole Action on a laptop.
+
+**The deep-link format, and how it was actually found.** The plan said to copy
+it out of the address bar. The bundle is a better source, because it explains
+*why* the URL is the shape it is — and the M1 precedent (stale auth docs
+recovered from `/assets/index-*.js`) said to look there first. Four independent
+confirmations, all against v0.134.0:
+
+1. `ROUTES.TRACE_DETAIL: '/trace/:id'` — a single trace, not `/traces/`.
+2. The trace-detail chunk (`TraceDetailsV3-*.js`) reads the selected span from
+   the query string: `searchParams.get('spanId')`, and a present `spanId` means
+   "expand the waterfall to this span".
+3. The UI's own **Copy link** handler builds `` `${pathname}?${params}` `` with
+   `spanId` set — so the template is literally what SigNoz puts on your
+   clipboard.
+4. `POST /api/v4/traces/{id}/waterfall` returns the span list for a real trace
+   and `{"type":"not-found"}` for a bogus one.
+
+        {base}/trace/{trace_id}                    # the trace
+        {base}/trace/{trace_id}?spanId={span_id}   # that span, pre-selected
+
+**Verifying a link means asking the API, not asking for a 200.** SigNoz is a
+SPA behind a catch-all: *every* path returns HTTP 200 with the same HTML shell,
+including `/trace/deadbeef` and `/trace/this-is-not-a-trace`. A status-code
+check would have "verified" a format that was completely wrong — the same trap
+that made the stale auth endpoints in M1 look like they worked. The real check
+is the API the page calls to populate itself, which is why
+`scripts/report_sample.py --verify` hits `/api/v4/traces/{id}/waterfall` and
+asserts a non-empty span list. All 6 links in a real gate report pass it.
+
+**A gate that can't run must not look like a gate that failed.** `preflight
+run` exits 2 when ingest never settles and `diff` exits 3 when there's nothing
+to compare; neither means the agent regressed. Both get their own annotation
+and a comment that says *the comparison did not happen*. Every path that
+produces no `report.md` synthesises one — silence in CI is exactly how a broken
+gate goes unnoticed, which is the failure mode this project exists to prevent.
+
+**Gotcha: GitHub's default shell is `bash -eo pipefail`, so `code=${PIPESTATUS[0]}`
+never runs.** The step dies on the failing command before it can capture the
+exit code it exists to capture — and the gate's whole design is "post the
+comment, *then* fail". Every step that inspects an exit code says `set +e`
+first. Caught by extracting each `run:` block out of the YAML and executing it
+under `bash --noprofile --norc -eo pipefail`, which is worth doing for any
+workflow you can't afford to debug by pushing commits.
+
+**Takeaway.** When the docs and the address bar are both weak sources, the
+frontend bundle is the strongest one available — it gives you the format *and*
+the reason. And when the server answers 200 to everything, "it returned 200" is
+not verification; find the request the page makes to render itself and check
+that instead.
+
+---
+
 ## 2026-07-27 — M3 differ + gate landed; the gate fires and stays quiet
 
 **What changed.** `preflight/differ.py` resolves a commit SHA to its most recent
