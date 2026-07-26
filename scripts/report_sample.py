@@ -241,9 +241,19 @@ def main() -> int:
     ap.add_argument("--verify", action="store_true", help="Check every link against SigNoz.")
     ap.add_argument("--pass", dest="passing", action="store_true", help="Render the green comment.")
     ap.add_argument("--output", help="Write the markdown here instead of stdout.")
+    ap.add_argument(
+        "--check",
+        metavar="FILE",
+        help="Verify the links in an existing report (e.g. one `preflight diff` wrote) "
+        "instead of rendering a sample.",
+    )
     args = ap.parse_args()
 
     cfg = config_mod.load()
+
+    if args.check:
+        return verify_links(Path(args.check).read_text(), cfg)
+
     trace_ids = fetch_trace_ids(cfg, len(CASES))
     if not trace_ids:
         print(

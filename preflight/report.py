@@ -250,6 +250,11 @@ def _offending_span(report: DiffReport, base: str) -> list[str]:
     if not url:
         return []
 
+    # On a clean run where nothing moved, "largest delta: $0.0000" is noise.
+    # Say nothing rather than point at an arbitrary case.
+    if not report.breached and abs(cost_rise(worst)) < 1e-9:
+        return []
+
     prior = base_by_id.get(worst.case_id)
     if prior is not None:
         detail = (

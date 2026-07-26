@@ -1,0 +1,293 @@
+name: Preflight
+
+# The gate. On every PR: stand up SigNoz inside the job, run the golden suite
+# on the merge base and on the PR head, diff the two runs *through SigNoz's
+# query API*, and post the verdict as a sticky comment.
+#
+# Two properties this workflow is built around:
+#
+#   1. **Self-contained.** Anyone who forks the repo gets a real run with no
+#      secrets and no hosted SigNoz. The stack is forged in-job from the
+#      committed `casting.yaml` + `casting.yaml.lock` -- the same command the
+#      README tells a human to run.
+#   2. **Free and deterministic.** `PREFLIGHT_REPLAY=1` forces the agent to
+#      replay committed cassettes, so CI never calls a model API. It costs
+#      nothing, and a delta is always attributable to the diff rather than to
+#      sampling noise.
+#
+# Note on shells: GitHub's default is `bash -eo pipefail`, so any step that
+# needs to *capture* a non-zero exit rather than die on it says `set +e` first.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: preflight-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Never call a model API from CI. Cassettes are committed on purpose.
+  PREFLIGHT_REPLAY: "1"
+  SIGNOZ_URL: http://localhost:8080
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4318
+  # Both runs read the *candidate* checkout's cassettes. The PR branch is a
+  # superset -- it adds cassettes for whatever the prompt change produced -- so
+  # this is what makes replaying the older baseline tree possible at all.
+  PREFLIGHT_CASSETTES: ${{ github.workspace }}/.cassettes
+  COMPOSE: pours/deployment/compose.yaml
+
+jobs:
+  gate:
+    name: Agent regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      # `fetch-depth: 0` because the baseline is a merge base, which needs
+      # history. `ref: head.sha` because the default for pull_request is an
+      # ephemeral merge commit, and the candidate SHA in the PR comment should
+      # be the commit the author actually pushed.
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Sync Python environment
+        run: uv sync
+
+      # ---- SigNoz, forged in-job from the committed casting.yaml -----------
+
+      - name: Install foundryctl
+        run: |
+          curl -fsSL https://signoz.io/foundry.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Forge the deployment from casting.yaml
+        run: |
+          # `pours/` is gitignored -- the committed casting.yaml + .lock are the
+          # source of truth and the compose files are rendered here, in-job.
+          foundryctl forge -f casting.yaml
+          echo "--- generated ---"
+          find pours -maxdepth 3 -type f | sort
+
+      - name: Start SigNoz
+        run: docker compose -f "$COMPOSE" up -d
+
+      # Its own step with a generous budget: container startup on a cold runner
+      # (image pulls, ClickHouse migrations, keeper election) is the slowest and
+      # most failure-prone thing in this job. It should fail *here*, with logs,
+      # rather than as a confusing timeout three steps later.
+      - name: Wait for SigNoz to become healthy
+        run: |
+          set +e
+          for i in $(seq 1 120); do
+            if curl -sf "$SIGNOZ_URL/api/v1/health" >/dev/null 2>&1; then
+              echo "SigNoz healthy after $((i * 5))s"
+              curl -s "$SIGNOZ_URL/api/v1/health"; echo
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error title=SigNoz never became healthy::No 200 from $SIGNOZ_URL/api/v1/health after 600s"
+          docker compose -f "$COMPOSE" ps
+          docker compose -f "$COMPOSE" logs --tail 200
+          exit 1
+
+      - name: Bootstrap SigNoz credentials
+        run: |
+          ./scripts/bootstrap_signoz.sh
+          # Export the minted key to every later step. Masked so no unrelated
+          # command can echo it into the log.
+          key=$(grep '^SIGNOZ_API_KEY=' .env | cut -d= -f2-)
+          test -n "$key" || { echo "::error::bootstrap produced no API key"; exit 1; }
+          echo "::add-mask::$key"
+          echo "SIGNOZ_API_KEY=$key" >> "$GITHUB_ENV"
+
+      # ---- resolve the baseline -------------------------------------------
+
+      - name: Resolve baseline SHA from the merge base
+        id: shas
+        run: |
+          git fetch --no-tags origin "+refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
+          candidate="${{ github.event.pull_request.head.sha }}"
+          baseline=$(git merge-base "origin/$GITHUB_BASE_REF" "$candidate")
+          test -n "$baseline" || { echo "::error::could not resolve a merge base"; exit 1; }
+          if [ "$baseline" = "$candidate" ]; then
+            echo "::error title=Nothing to compare::The merge base equals the PR head."
+            exit 1
+          fi
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline  $baseline"
+          echo "candidate $candidate"
+
+      # ---- run the suite on both SHAs -------------------------------------
+      #
+      # The baseline runs from a detached worktree of the merge base, because
+      # the whole premise is that the *agent code* changed. Running the current
+      # tree twice under two labels would compare nothing.
+
+      - name: Run suite on the baseline
+        id: baseline_run
+        run: |
+          set +e
+          git worktree add --detach "$RUNNER_TEMP/baseline" "${{ steps.shas.outputs.baseline }}" || exit 1
+          cd "$RUNNER_TEMP/baseline" || exit 1
+          uv sync || exit 1
+          PREFLIGHT_COMMIT_SHA="${{ steps.shas.outputs.baseline }}" \
+            uv run preflight run 2>&1 | tee "$RUNNER_TEMP/baseline.log"
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+      - name: Run suite on the candidate
+        id: candidate_run
+        run: |
+          set +e
+          PREFLIGHT_COMMIT_SHA="${{ steps.shas.outputs.candidate }}" \
+            uv run preflight run 2>&1 | tee "$RUNNER_TEMP/candidate.log"
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+      # `preflight run` exits 2 when the ingest poller times out -- it refuses
+      # to let the differ read a half-ingested run. That is an infrastructure
+      # failure and has to read as one, not as "the agent regressed".
+      - name: Explain a suite failure
+        if: failure() && (steps.baseline_run.outcome == 'failure' || steps.candidate_run.outcome == 'failure')
+        run: |
+          set +e
+          echo "::error title=Suite did not complete::preflight run failed. Exit 2 = SigNoz did not ingest the run within ingest.poll_timeout_seconds; exit 3 = SigNoz unreachable. Neither means the agent regressed."
+          echo "--- ingester logs ---"
+          docker compose -f "$COMPOSE" logs --tail 200 ingester
+
+      # ---- the gate --------------------------------------------------------
+
+      - name: Diff baseline vs candidate
+        id: diff
+        run: |
+          set +e
+          uv run preflight diff \
+            --baseline "${{ steps.shas.outputs.baseline }}" \
+            --candidate "${{ steps.shas.outputs.candidate }}" \
+            --format markdown \
+            --output report.md 2>&1 | tee "$RUNNER_TEMP/diff.log"
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "preflight diff exited $code"
+          # Deliberately succeed. The comment is the product -- post it first,
+          # then fail the check in the last step.
+          exit 0
+
+      # Any path that produced no report.md -- a suite that died, a differ that
+      # could not compare -- still gets a comment. Silence in CI is how a broken
+      # gate goes unnoticed, which is the failure mode this project exists to
+      # prevent.
+      - name: Compose a failure report if the gate never produced one
+        if: always() && hashFiles('report.md') == ''
+        run: |
+          set +e
+          code="${{ steps.diff.outputs.exit_code }}"
+          {
+            echo '<!-- preflight-report -->'
+            echo
+            echo '## ⚠️ Preflight — the gate could not run'
+            echo
+            echo "\`${{ steps.shas.outputs.baseline }}\` → \`${{ steps.shas.outputs.candidate }}\`"
+            echo
+            echo "> This is **not** a regression verdict — the comparison never happened."
+            echo "> \`preflight diff\` exit code: \`${code:-n/a}\` (2 = SigNoz never ingested the run, 3 = SigNoz unreachable or nothing to compare)."
+            echo
+            echo "See the [job log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+            echo
+            echo '<details><summary>Last output</summary>'
+            echo
+            echo '```'
+            tail -40 "$RUNNER_TEMP/diff.log" 2>/dev/null \
+              || tail -40 "$RUNNER_TEMP/candidate.log" 2>/dev/null \
+              || tail -40 "$RUNNER_TEMP/baseline.log" 2>/dev/null \
+              || echo "(no output captured)"
+            echo '```'
+            echo
+            echo '</details>'
+          } > report.md
+
+      - name: Upload report and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-report
+          path: |
+            report.md
+            ${{ runner.temp }}/*.log
+          if-no-files-found: warn
+
+      # ---- sticky comment --------------------------------------------------
+
+      - name: Post or update the PR comment
+        if: always() && hashFiles('report.md') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            // Must match preflight/report.py::MARKER exactly.
+            const MARKER = '<!-- preflight-report -->';
+            const body = fs.readFileSync('report.md', 'utf8');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            // Upsert: one Preflight comment per PR, edited in place, so a
+            // 12-commit PR does not produce 12 identical walls of table.
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 },
+            );
+            const existing = comments.find(
+              (c) => c.body && c.body.includes(MARKER),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+              core.info(`updated comment ${existing.id}`);
+            } else {
+              const { data } = await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+              core.info(`created comment ${data.id}`);
+            }
+
+      - name: Job summary
+        if: always() && hashFiles('report.md') != ''
+        run: cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- the verdict -----------------------------------------------------
+
+      - name: Fail the check on a breach
+        if: always() && steps.diff.outputs.exit_code == '1'
+        run: |
+          echo "::error title=Agent regression::A gated metric breached its threshold. The PR comment has the delta table and a link to the offending trace."
+          exit 1
+
+      - name: Fail the check if the gate could not evaluate
+        if: always() && steps.diff.outcome == 'success' && steps.diff.outputs.exit_code != '0' && steps.diff.outputs.exit_code != '1'
+        run: |
+          echo "::error title=Preflight could not evaluate::preflight diff exited ${{ steps.diff.outputs.exit_code }} — no verdict was produced."
+          exit 1
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f "$COMPOSE" down -v || true
