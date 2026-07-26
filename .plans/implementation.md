@@ -6,7 +6,7 @@
 |---|---|---|
 | M1 | Walking skeleton — Foundry up, one instrumented trace, read back via query API | **Done** — check passed |
 | M2 | Golden suite + full instrumentation | Not started |
-| M3 | Differ + gate | Not started |
+| M3 | Differ + gate | **Done** — check passed (exit 1 with the cost delta named, exit 0 on a clean re-run; regression proven with synthetic runs through real SigNoz, see DECISIONS.md) |
 | M4 | GitHub Action + PR comment (*demo complete here*) | Not started |
 | M5 | Dashboards + alerts as code | Not started |
 | M6 | Diagnosis agent over MCP | Not started |
@@ -34,8 +34,25 @@ group-by on custom span attributes.
 `wait_for_ingest` until SigNoz reports the expected span count, raising
 `IngestTimeout` rather than allowing a partial diff.
 
-**CLI.** `preflight run | query | raw`. `raw` is a debugging escape hatch for
-arbitrary scalar queries.
+**Differ + gate.** `preflight/differ.py` resolves each commit SHA to its most
+recent `eval.run_id` (one scalar query grouped by `eval.run_id`, aggregating
+`count()` and `max(timestamp)`), reads both runs through
+`query.run_summary_typed`, and computes every metric in
+`contracts.GATED_METRICS` via `RunSummary.metric()` — the differ deliberately
+does none of the metric arithmetic itself, so it and `report.py` cannot disagree
+about what "cost per task" means. Thresholds come from `preflight.yaml`.
+Percentage rise for the five higher-is-worse metrics, absolute drop for
+`success_rate`, plus an absolute noise floor on latency. Runs with different
+case sets are compared on their intersection and say so in `DiffReport.notes`.
+`DiffError` (nothing comparable) is kept strictly separate from a breach.
+
+**CLI.** `preflight run | query | diff | raw`. `raw` is a debugging escape hatch
+for arbitrary scalar queries. `diff --baseline <sha> --candidate <sha>` takes
+`--format markdown|json`, `--output <path>` and `--lookback-minutes`, and its
+exit codes are part of the interface: **0** clean, **1** a gated metric
+breached, **2** ingest timed out, **3** SigNoz unreachable or nothing to
+compare. 1 and 3 are deliberately distinct — an expired baseline must never
+render in CI as a broken agent.
 
 **Bootstrap.** `scripts/bootstrap_signoz.sh` creates the first admin user, mints
 an admin-scoped service-account key, verifies it, and writes `.env`.
