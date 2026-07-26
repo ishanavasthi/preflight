@@ -137,7 +137,7 @@ class SigNozClient:
         start_ms = end_ms - lookback_minutes * 60_000
         rows = self.scalar(
             aggregations=[Aggregation("count()", "span_count")],
-            filter_expression=f"eval.run_id = '{run_id}'",
+            filter_expression=f"attribute.eval.run_id = '{run_id}'",
             start_ms=start_ms,
             end_ms=end_ms,
         )
@@ -158,7 +158,7 @@ class SigNozClient:
                 Aggregation("sum(gen_ai.usage.output_tokens)", "output_tokens"),
                 Aggregation("sum(preflight.cost_usd)", "cost_usd"),
             ],
-            filter_expression=f"eval.run_id = '{run_id}'",
+            filter_expression=f"attribute.eval.run_id = '{run_id}'",
             group_by=["eval.case_id"],
             start_ms=start_ms,
             end_ms=end_ms,
@@ -185,7 +185,13 @@ class SigNozClient:
         """
         end_ms = int(time.time() * 1000)
         start_ms = end_ms - lookback_minutes * 60_000
-        where = f"eval.run_id = '{run_id}'"
+        # Qualify with `attribute.` explicitly. An unqualified name in a
+        # SigNoz filter resolves against *resource* attributes first, and
+        # otel.py stamps vcs.commit_sha on the resource -- so an unqualified
+        # filter silently means something different from what it reads like.
+        # eval.run_id happens to exist only as a span attribute today, which
+        # makes the unqualified form work by luck rather than by design.
+        where = f"attribute.eval.run_id = '{run_id}'"
 
         totals = self.scalar(
             aggregations=[
@@ -205,7 +211,7 @@ class SigNozClient:
         def _role_counts(role: str, alias: str) -> dict[str, int]:
             rows = self.scalar(
                 aggregations=[Aggregation("count()", alias)],
-                filter_expression=f"{where} AND preflight.span_role = '{role}'",
+                filter_expression=f"{where} AND attribute.preflight.span_role = '{role}'",
                 group_by=["eval.case_id"],
                 start_ms=start_ms,
                 end_ms=end_ms,
@@ -258,7 +264,8 @@ class SigNozClient:
             rows = self.scalar(
                 aggregations=[Aggregation("count()", "spans")],
                 filter_expression=(
-                    f"eval.run_id = '{run_id}' AND preflight.span_role = 'case'"
+                    f"attribute.eval.run_id = '{run_id}' "
+                    "AND attribute.preflight.span_role = 'case'"
                 ),
                 group_by=["eval.case_id", ("trace_id", "span")],
                 start_ms=start_ms,
