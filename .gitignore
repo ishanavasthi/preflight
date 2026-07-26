@@ -1,0 +1,12 @@
+# Secrets. The SigNoz API key lives here and must never be committed.
+.env
+
+# Foundry generates these from casting.yaml; casting.yaml and casting.yaml.lock
+# are committed (Field Requirement 3), the rendered output is not.
+pours/
+
+__pycache__/
+*.py[cod]
+.venv/
+uv.lock
+.pytest_cache/

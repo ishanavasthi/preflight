@@ -1,0 +1,4 @@
+id: order-status
+prompt: Where is order 8841?
+tools: [lookup_order]
+expect_contains: order

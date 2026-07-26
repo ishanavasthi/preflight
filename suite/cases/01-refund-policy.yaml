@@ -1,0 +1,4 @@
+id: refund-policy
+prompt: What is the refund policy for an order shipped 20 days ago?
+tools: [lookup_order, policy_search]
+expect_contains: refund

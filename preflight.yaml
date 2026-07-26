@@ -1,0 +1,45 @@
+# Preflight configuration.
+#
+# Everything the gate needs that is not code: where SigNoz lives, what models
+# cost, and how much regression is too much. Kept in the repo so every number in
+# a PR comment is auditable against a committed source.
+
+signoz:
+  # Base URL of the SigNoz query API. Overridden by SIGNOZ_URL.
+  url: http://localhost:8080
+  # API key is read from SIGNOZ_API_KEY only -- never committed.
+
+otel:
+  # OTLP/HTTP endpoint exposed by the Foundry compose deployment.
+  # Overridden by OTEL_EXPORTER_OTLP_ENDPOINT.
+  endpoint: http://localhost:4318
+  service_name: preflight-agent
+
+ingest:
+  # Unknown #2 in BUILD_PLAN.md: CI writes traces and immediately reads
+  # aggregates back. After force_flush() we poll SigNoz until the run's spans
+  # are visible, then fail loudly rather than diff a half-ingested run.
+  poll_timeout_seconds: 120
+  poll_interval_seconds: 2
+
+# Model price table, USD per million tokens. Source of preflight.cost_usd.
+models:
+  claude-sonnet-5:
+    # $3/$15 list; $2/$10 introductory through 2026-08-31.
+    input_per_mtok: 2.00
+    output_per_mtok: 10.00
+  claude-opus-5:
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+  fake-model-m1:
+    # Deterministic stub used by the M1 walking skeleton.
+    input_per_mtok: 2.00
+    output_per_mtok: 10.00
+
+# Gate thresholds. Set well above observed run-to-run variance -- see the
+# "golden-suite non-determinism" risk in BUILD_PLAN.md. Populated in M3.
+thresholds:
+  cost_usd_per_task_pct: 20
+  total_tokens_per_task_pct: 20
+  p95_latency_ms_pct: 50
+  success_rate_abs_drop: 0.0
