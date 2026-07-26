@@ -120,7 +120,7 @@ the deep links resolve; `make lint-ci` runs actionlint + shellcheck.
 | SigNoz MCP server | port 8000, enabled | Wired up; used in M5/M6 |
 | Anthropic API | `preflight/replay.py` | `anthropic` SDK, `claude-haiku-4-5-20251001` only. Every call gated by `preflight/budget.py` against a $1 cap; total M2 spend $0.1123 / 69 calls |
 | Cassette replay | `.cassettes/` (committed) | 12 baseline + 21 on `seeded-regression`. Default execution path — CI and a fresh clone run the suite offline and free |
-| GitHub Actions | M4 | `gh` CLI authed as `ishanavasthi` |
+| GitHub Actions | `.github/workflows/preflight.yml` | `pull_request` gate; SigNoz forged in-job, sticky PR comment via `actions/github-script`, zero API spend (`PREFLIGHT_REPLAY=1`). `gh` authed as `ishanavasthi` |
 
 ## Attributes emitted
 
