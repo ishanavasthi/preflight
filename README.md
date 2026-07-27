@@ -14,6 +14,8 @@ user complains.
 **Preflight catches it on the pull request that caused it, and links the exact
 span that explains why.**
 
+📹 **[Watch the demo video](https://link.ishanavasthi.in/preflight-video)**
+
 ---
 
 ## This is the real thing, not a mockup
