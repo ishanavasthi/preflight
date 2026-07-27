@@ -1,8 +1,0 @@
-apiVersion: v1alpha1
-kind: Installation
-metadata:
-  name: signoz
-spec:
-  deployment:
-    flavor: helm
-    mode: kubernetes
