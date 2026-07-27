@@ -9,7 +9,7 @@
 | M3 | Differ + gate | **Done** — check passed (exit 1 with the cost delta named, exit 0 on a clean re-run; regression proven with synthetic runs through real SigNoz, see DECISIONS.md) |
 | M4 | GitHub Action + PR comment (*demo complete here*) | **Built** — validated locally end to end (`make ci-local` exits 1, all 6 deep links resolve); awaiting the real PR, which the human opens |
 | M5 | Dashboards + alerts as code | **Done** — check passed (dashboard deleted, `make signoz-apply` restored it byte-identically; 27/27 panel queries return real data) |
-| M6 | Diagnosis agent over MCP | Not started |
+| M6 | Diagnosis agent over MCP | **Done** — check passed (gate fails, the explanation names `damaged-item` +284% cost and cites `policy_search`/`policy-kb`, which exist only in spans; the investigation is itself a 22-span trace, live example `c4696bb3c183db783f8260f748eb21e9`) |
 | M7 | Ship — README, video, blog, submission form | Not started |
 
 ## What is built
@@ -131,6 +131,41 @@ one returns nothing — an empty panel and a broken panel look identical in the 
 so this is the only thing that tells them apart. `make signoz-apply-check` is the
 M5 acceptance check. `make signoz-diff` reports what apply would change.
 
+**Diagnosis agent (M6).** `preflight/diagnose.py` takes a failed `DiffReport`
+and explains it in English, using the **SigNoz MCP server** as its only source
+of facts. It cannot read the repository, so every artefact it names came out of
+a span. `preflight/mcp.py` is the client — M5's hand-rolled transport moved out
+of `scripts/mcp_client.py` (now a re-export shim, because the frozen
+`scripts/signoz_apply.py` imports from it) plus two things the agent needs:
+
+- `anthropic_tools()` reads the **live** `inputSchema`s off the server and prunes
+  42 tools to a curated 2 (`signoz_aggregate_traces`, `signoz_get_trace_details`)
+  with only the parameters the agent may set. `start` / `end` / `searchContext`
+  are injected, not exposed. Pasting the advertised schemas verbatim would cost
+  >10k input tokens *per turn*; the pruned surface is ~1.9k characters.
+- `compact()` strips SigNoz's `{status, data:{data:{results}}}` envelope,
+  per-column metadata and the ~30 always-null well-known fields every span row
+  carries. A `get_trace_details` response goes from 17.5k characters to 5.1k.
+
+The agent is **instrumented into SigNoz through `preflight/instrument.py`**: its
+own LLM turns are `llm_span`s and its own MCP calls are `tool_span`s, on the
+same GenAI attributes the reference agent uses, under a root `diagnose
+regression` span. A full investigation is ~22 spans. Those spans carry
+`vcs.commit_sha = diagnosis-<sha>` under service name `preflight-diagnose` and
+**not** the real SHA — `differ.resolve_run()` resolves a SHA to its *most
+recent* run, so a diagnosis stamped with the candidate SHA would win that race
+and the gate would start diffing against its own explanation.
+
+`make m6-check` is the acceptance check and **replays**: the query window is
+pinned (it is part of the cassette key, since it appears in every tool call's
+arguments), so the check reproduces a byte-identical diagnosis with no
+`ANTHROPIC_API_KEY` at all — the state a judge cloning the repo is in.
+`make m6-check-live` re-records for ~$0.06. `make explain-dry` prints the whole
+prompt and tool surface for $0.
+
+Shipped as `python -m preflight.diagnose`, not `preflight explain`, because
+`cli.py` was frozen during M6; wiring it in is a one-line `add_command`.
+
 ## Integrations
 
 | Integration | Where | Notes |
@@ -138,9 +173,9 @@ M5 acceptance check. `make signoz-diff` reports what apply would change.
 | SigNoz query API v5 | `preflight/query.py` | Source of truth for the gate |
 | OTLP/HTTP | `preflight/otel.py` | Traces, metrics **and logs** to `:4318` |
 | Foundry | `casting.yaml` | Deployment reproducibility (Field Req 3) |
-| SigNoz MCP server | port 8000, enabled | 42 tools. **M5 applies all dashboards and alerts through it** (`scripts/signoz_apply.py`); also used by M6 |
-| Anthropic API | `preflight/replay.py` | `anthropic` SDK, `claude-haiku-4-5-20251001` only. Every call gated by `preflight/budget.py` against a $1 cap; total M2 spend $0.1123 / 69 calls |
-| Cassette replay | `.cassettes/` (committed) | 12 baseline + 21 on `seeded-regression`. Default execution path — CI and a fresh clone run the suite offline and free |
+| SigNoz MCP server | `preflight/mcp.py`, port 8000 | 42 tools. **M5 applies all dashboards and alerts through it** (`scripts/signoz_apply.py`) and **M6's diagnosis agent investigates through it** (`preflight/diagnose.py`) — no REST call in either path |
+| Anthropic API | `preflight/replay.py` | `anthropic` SDK, `claude-haiku-4-5-20251001` only. Every call gated by `preflight/budget.py` against a $1 cap; total project spend $0.2216 / 81 calls (M2 $0.1123, M6 $0.1093) |
+| Cassette replay | `.cassettes/` + `.cassettes-diagnose/` (committed) | 12 baseline + 21 on `seeded-regression`; 6 more for the recorded diagnosis. Default execution path — CI, `make m6-check` and a fresh clone all run offline and free |
 | GitHub Actions | `.github/workflows/preflight.yml` | `pull_request` gate; SigNoz forged in-job, sticky PR comment via `actions/github-script`, zero API spend (`PREFLIGHT_REPLAY=1`). `gh` authed as `ishanavasthi` |
 
 ## Attributes emitted

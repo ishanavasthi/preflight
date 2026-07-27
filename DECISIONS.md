@@ -599,3 +599,97 @@ created, which is the idempotency half. Output in learnings.md.
   generator for consistency, which was not kept: a committed generator would
   make the JSON a build artifact and give the repo two sources of truth for the
   same object. `make signoz-verify-panels` is what catches a hand-edit mistake.
+
+---
+
+## M6 — Diagnosis agent over MCP
+
+### `preflight/mcp.py` absorbed `scripts/mcp_client.py`, as M5 said it should
+
+M5's entry recorded that `scripts/mcp_client.py` existed only because
+`preflight/mcp.py` was M6's to own, and that it should collapse once M6 landed.
+It has: the transport in `preflight/mcp.py` is M5's, moved unchanged, so there
+is one wire implementation in the repo. `scripts/mcp_client.py` survives as a
+re-export shim because `scripts/signoz_apply.py` imports from it and is on the
+frozen demo path. `make signoz-apply-check` was re-run through the shim and
+still passes — dashboard deleted, restored byte-identically, third apply creates
+nothing.
+
+### Shipped as `python -m preflight.diagnose`, not `preflight explain`
+
+BUILD_PLAN M6 names the command `preflight explain`. `preflight/cli.py` was
+frozen while M6 was built, so the agent ships as a module entrypoint plus
+`make explain`. Wiring it into the Click group is a one-line `add_command`
+follow-up and changes nothing about the agent.
+
+### The diagnosis does **not** append to the PR comment
+
+BUILD_PLAN says the explanation is appended to the PR comment. It is not, and
+the reason is scope discipline rather than difficulty: `report.py` and
+`.github/workflows/preflight.yml` are the demo path and were frozen. The agent
+is a standalone command whose output is a string; the Action would call it after
+`preflight diff` and concatenate. Deliberately not done here.
+
+### Diagnosis spans are kept out of the gate's SHA namespace
+
+Diagnosis spans carry `vcs.commit_sha = diagnosis-<sha>` and run under service
+name `preflight-diagnose`, rather than being stamped with the candidate SHA they
+are about. This is a correctness requirement, not tidiness: `differ.resolve_run`
+resolves a SHA to its **most recent** `eval.run_id`, so a diagnosis emitted after
+the candidate suite run would win that resolution and the next gate would diff
+the agent against its own explanation. The cost is that correlating a diagnosis
+to its subject is a string match on the tag rather than an exact SHA match,
+which is a fair trade for making the failure impossible.
+
+### The agent gets 2 of the server's 42 tools, with pruned schemas
+
+`mcp.anthropic_tools()` reads the **live** `inputSchema`s off the server and
+keeps two tools (`signoz_aggregate_traces`, `signoz_get_trace_details`) and only
+the parameters the agent may set; `start`, `end` and `searchContext` are
+injected. Two reasons. Cost: the advertised schemas are faithful renderings of
+the Go types and pasting all 42 would exceed 10k input tokens *per turn* of a
+tool-use loop, against a $1 project ceiling. Correctness: the window is the
+gate's to choose, and a model-hallucinated one yields a silently empty result
+rather than an error. Types and descriptions still come from the deployment, so
+an upstream schema change is a loud `KeyError` at startup.
+
+One deliberate normalisation: SigNoz advertises union types (`"type":
+["integer", "string"]`), which is legal JSON Schema but not worth betting a paid
+call on, so they are collapsed to the most specific member.
+
+### The acceptance check replays by default, and pins its time window
+
+`make m6-check` runs with `PREFLIGHT_REPLAY=1` and a pinned `--window-end`, so
+it reproduces a byte-identical diagnosis with **no `ANTHROPIC_API_KEY`** — the
+state a judge cloning this repo is in — and a cassette miss is a loud error
+rather than a silent $0.06. The window has to be pinned because it appears in
+every MCP call's arguments and is therefore part of the cassette key; rounding
+alone only buys ten minutes. `make m6-check-live` re-records against a fresh
+window. `.cassettes-diagnose/` is separate from `.cassettes/` on purpose: mixing
+an exploratory investigation into the suite's committed fixtures would make the
+gate's inputs depend on how often somebody ran `explain`.
+
+### The prompt was A/B'd, and the more "rigorous" one was rejected
+
+A tightened system prompt — demand both-sides measurement, name a concrete root
+cause from a fixed list, justify ruling the others out — produced visibly better
+*reasoning* (it identified a system-prompt edit and ruled out a model swap on
+span evidence) and visibly worse *investigation*: it never grouped by
+`gen_ai.tool.name` and so asserted "the same tools appear in both runs", which
+is false. The acceptance check caught it. The shipped prompt is the earlier one,
+which finds `policy_search` and hedges the cause. Recorded next to the prompt in
+`diagnose.py` so it does not get "improved" back. Cost of learning this: $0.048.
+
+### Not done in M6
+
+- **No PR-comment integration** (above).
+- **No CLI subcommand** (above).
+- **The root-cause sentence is the weak half.** The diagnosis is strong on what
+  regressed — it names `damaged-item`, quotes +284% cost / +253% tokens
+  correctly, and cites `policy_search` and `policy-kb`, which exist only in
+  spans. On *why*, it hedges across three mechanisms where the truth is a
+  system-prompt edit, and it misstates one baseline count (`policy_search` 8
+  "instead of 6"; the baseline is 0). Honest summary: a reviewer would look in
+  the right place and would not misjudge severity, but the root-cause sentence
+  should not be quoted unchecked. Closing that gap needs either a repo-diff tool
+  alongside the SigNoz ones, or a bigger model — both out of budget.

@@ -4,6 +4,125 @@ Newest first.
 
 ---
 
+## 2026-07-27 — M6: the diagnosis agent, and what it costs to make a model investigate
+
+**What changed.** `preflight/diagnose.py` takes a failed gate and explains it in
+plain English, driving the **SigNoz MCP server** as its only source of facts —
+and its own investigation lands in SigNoz as a 22-span trace. `preflight/mcp.py`
+is the client, which is M5's transport *moved* rather than rewritten.
+`make m6-check` is the acceptance check and passes with **no API key at all**.
+
+**The check, run:**
+
+        [1/4] gate the seeded regression (e0592cf8 -> 59607e52)
+          PASS  the gate failed, so there is something to explain
+        [2/4] diagnosis agent, driving the SigNoz MCP server
+               6 turn(s), 15 MCP call(s), 49414+2270 tokens, $0.06076
+        [3/4] PASS names the worst case (damaged-item)
+              PASS names the regressed metric  --  cost, token
+              PASS cites span-level evidence absent from its own prompt
+                                               --  policy_search, policy-kb
+              PASS the investigation actually went through MCP -- 15 tool call(s)
+        [4/4] 22 span(s): diagnose regression, chat claude-haiku-4-5-20251001,
+              execute_tool signoz_aggregate_traces, execute_tool signoz_get_trace_details
+        PASS  diagnosis trace: c4696bb3c183db783f8260f748eb21e9
+
+**The headline finding: an acceptance check for a model's output has to assert
+something the model could not have guessed.** The obvious test — "does the
+explanation name the worst case?" — is nearly worthless here, because the gate's
+own per-case table is in the agent's prompt. A model that read nothing and
+called nothing could pass it by copying its input. What makes the check real is
+that `policy_search` and `policy-kb` appear **nowhere in the prompt**: they exist
+only as span attributes, so quoting them is proof the agent went to SigNoz and
+came back. The general rule: when testing a generated explanation, find a fact
+that lives only on the far side of the tool call, and assert on that. Everything
+else measures fluency.
+
+**Steering the conclusion cost me the evidence.** The first prompt produced a
+diagnosis that found `policy_search` and `policy-kb` but hedged the root cause
+across three possibilities. So I tightened it — demand both-sides measurement,
+name a concrete cause from a fixed list, say why the others don't fit. The
+second run reasoned *visibly better*: it correctly identified a system-prompt
+edit and explicitly ruled out a model swap on the evidence that every span still
+showed `claude-haiku-4-5-20251001`. It also **never grouped by
+`gen_ai.tool.name`**, and therefore asserted "the same tools appear in both
+runs" — which is flatly false; `policy_search` is new in the candidate. The
+check caught it. Same model, same tools, same data, $0.048: the extra
+instruction about *what to conclude* pulled effort away from *gathering what the
+conclusion rests on*. I kept the first prompt. A confidently wrong diagnosis is
+worse than a correctly hedged one, and the A/B is recorded next to the prompt so
+the next person doesn't "improve" it back.
+
+**A pinned time window is what makes a recorded investigation replayable.** The
+cassette key is a hash of the whole request, and every MCP call carries `start`
+and `end`, so the window is *inside* the key. An unpinned window means every
+cassette misses ten minutes after recording, and a "reproducible" check quietly
+becomes a $0.06 API call. Two fixes, both needed: round `end` up to a 10-minute
+bucket so two runs a minute apart ask identical questions, and let it be pinned
+outright (`--window-end`) so the committed cassettes name the slice of time they
+were recorded against. With both, `make m6-check` replays byte-identically with
+`ANTHROPIC_API_KEY` unset — which is the state a judge cloning this repo is in.
+The general shape: **anything that varies between runs and reaches the request
+is part of your cache key, whether you meant it to be or not.**
+
+**Compaction is a cost control, not a nicety.** A `signoz_get_trace_details`
+response is 17.5k characters, of which the envelope, per-column metadata and ~30
+always-null well-known fields (`k8s.*`, `db.*`, `cloud.*`) are almost all of it.
+`mcp.compact()` gets it to 5.1k. That matters more than it looks: in a tool-use
+loop the whole transcript is re-sent every turn, so one fat tool result is not
+paid once, it is paid on every subsequent turn. The same logic applies to the
+tool schemas — the server's advertised `inputSchema`s are faithful and verbose,
+and pasting all 42 would cost >10k input tokens *per turn*. `anthropic_tools()`
+reads them live but keeps 2 tools and only the parameters the agent may set.
+Curation is ours; the types stay the server's, so a schema that changes upstream
+is a loud `KeyError` at startup rather than a 400 mid-investigation.
+
+**Gotcha: the diagnosis nearly poisoned the gate.** The instinct is to stamp
+diagnosis spans with the SHA they are about. That would have been a real
+outage-in-waiting: `differ.resolve_run()` resolves a SHA to its *most recent*
+`eval.run_id`, and a diagnosis emitted after the candidate suite wins that race
+— so the next gate run would diff the agent against its own explanation.
+Diagnosis spans therefore carry `vcs.commit_sha = diagnosis-<sha>` under service
+name `preflight-diagnose`. Same family as M5's `name`-is-not-an-idempotency-key
+trap: a field that looks like a correlation key is a *selector* somewhere else.
+
+**Gotcha: poll for the root span, not for any span.** The first check run failed
+[4/4] reporting the root `diagnose regression` span missing — it was there 200ms
+later. The root closes and exports *last*, so "the trace exists" goes true
+before the trace is *complete*, and a poll that breaks on the first non-empty
+read observes a torn trace. Wait on the last-written span. This is M1's
+ingest-lag lesson at one span's resolution rather than one run's.
+
+**Honest read on the diagnosis quality.** Strong on *what*: it names
+`damaged-item`, quotes +284% cost / +253% tokens / +292% latency correctly, and
+finds the two structural facts that only exist in spans (a new `policy_search`
+tool, `policy-kb` hops 6 → 14). Weaker on *why*: it says "an additional agentic
+loop or reasoning step... a retry mechanism, a multi-turn reasoning pattern, or
+changed decision logic" where the truth is a system-prompt edit mandating a
+fixed four-step tool sequence — directionally right, three-ways hedged, and it
+never names a prompt change. It also slips once: "`policy_search` 8 times
+instead of 6" is wrong (the baseline is **0** — it appears to have read across
+from `lookup_order`'s 6). A reviewer handed this would look in the right place
+and would not be misled about severity, but the specific root-cause sentence is
+not something to quote without checking.
+
+**Cost: $0.1093** — two live investigations at ~$0.06 and ~$0.048, plus a free
+schema validation through `/v1/messages/count_tokens`, which accepts `tools` and
+costs nothing (worth knowing: it is the only way to prove a tool schema is
+well-formed without paying for a completion). Everything else — the whole loop,
+the instrumentation, the full-circle proof — was developed against a **stubbed
+model response**, which cost $0 and caught every plumbing bug before a single
+paid call. Total project spend $0.2216 of $1.00.
+
+**Aside: the API key was dead for ~25 minutes mid-milestone**, returning `401
+invalid x-api-key` (not `credit_balance_too_low` — worth distinguishing, they
+mean opposite things). It recovered on its own. The useful response was to keep
+building everything that needed no inference and prove the full-circle property
+with a stub, so that when the key returned the milestone was one command from
+done.
+
+---
+
 ## 2026-07-27 — M5: dashboards and alerts as code, through MCP; and the metrics read path cracked
 
 **What changed.** Four dashboards (24 panels) and two alert rules, committed as
