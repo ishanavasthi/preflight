@@ -156,12 +156,19 @@ regression` span. A full investigation is ~22 spans. Those spans carry
 recent* run, so a diagnosis stamped with the candidate SHA would win that race
 and the gate would start diffing against its own explanation.
 
-`make m6-check` is the acceptance check and **replays**: the query window is
-pinned (it is part of the cassette key, since it appears in every tool call's
-arguments), so the check reproduces a byte-identical diagnosis with no
-`ANTHROPIC_API_KEY` at all — the state a judge cloning the repo is in.
-`make m6-check-live` re-records for ~$0.06. `make explain-dry` prints the whole
-prompt and tool surface for $0.
+The span count is **not fixed** — it is one root span plus one per LLM turn plus
+one per MCP call, so it moves with how many queries the agent decides to run.
+Observed 22 and 25 in two runs. Quote it as "roughly two dozen", never a number.
+
+`make m6-check-live` is the reliable acceptance check (~$0.05). `make m6-check`
+replays and is **best-effort**: pinning the query window removed the obvious
+source of drift, but the cassette key is a hash of the *whole* request, and every
+MCP tool result is in the transcript — so the cassette only hits while SigNoz
+still holds the data it was recorded against. It replayed five times on
+2026-07-27 and then stopped once the stack restarted and the underlying runs
+aged. A miss raises `ReplayMiss` with a self-describing error rather than
+spending or guessing. `make explain-dry` prints the whole prompt and tool surface
+for $0.
 
 Shipped as `python -m preflight.diagnose`, not `preflight explain`, because
 `cli.py` was frozen during M6; wiring it in is a one-line `add_command`.

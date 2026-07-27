@@ -54,12 +54,16 @@ expected span count, and raises on timeout. Observed lag is 2–4s; the timeout 
 120s. The rule when it trips is to **raise the timeout and say so in the README**,
 never to shorten it to look fast.
 
-### Model access via OpenRouter with an Anthropic-shaped client
+### Model access: planned for OpenRouter, shipped on a first-party Anthropic key
 
-No Anthropic API key on the build machine. Rather than rewrite the agent around a
-different provider's SDK, point an Anthropic-style client at OpenRouter by
-overriding the base URL. Keeps `gen_ai.provider.name` / `gen_ai.request.model`
-semantics intact and makes swapping back to a first-party key a one-line change.
+The plan assumed no Anthropic key on the build machine, so the design was to
+point an Anthropic-shaped client at OpenRouter by overriding the base URL —
+keeping `gen_ai.provider.name` / `gen_ai.request.model` semantics intact and
+making a swap a one-line change. **A first-party key arrived before M2 started,
+so the base-URL override was never needed** and the agent talks to
+`api.anthropic.com` directly on `claude-haiku-4-5-20251001`. The decision is kept
+here because the *shape* is what mattered: not rewriting the agent around another
+provider's SDK is why swapping the endpoint would have been one line either way.
 
 Prices for whatever model is actually used live in `preflight.yaml` so the cost
 math stays auditable against a committed source.

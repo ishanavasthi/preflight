@@ -43,5 +43,8 @@ silent drift.
 - **Agency Protocol 7:** AI assistance must be declared. Built with Claude Code;
   disclosed in the README and on the submission form.
 - **Agency Protocol 8:** planning was written pre-kickoff; code started at kickoff.
-- No Anthropic API key available on the build machine — model access is via
-  OpenRouter (see `approach.md`).
+- **Model budget: $1.00 of Anthropic credit, `claude-haiku-4-5-20251001` only.**
+  Enforced by a file-locked ledger that fails closed, not by care. Final spend
+  $0.2216 across 81 calls. (The plan assumed no first-party key and an OpenRouter
+  base-URL override; a key arrived before M2 and the override was never needed —
+  see `approach.md`.)
