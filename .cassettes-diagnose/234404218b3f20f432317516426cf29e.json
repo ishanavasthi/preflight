@@ -1,0 +1,129 @@
+{
+  "key": "234404218b3f20f432317516426cf29e",
+  "request": {
+    "max_tokens": 2048,
+    "messages": [
+      {
+        "content": "GATE VERDICT: FAILED\nbaseline   e0592cf84cc6  run=run-8231bf5f8d62\ncandidate  59607e52008b  run=run-1b7a2c64a25f\n\ngated metrics (mean per task across the suite):\n  metric                         baseline    candidate     change  breached\n  cost_usd_per_task              $0.00256     $0.00641    +150.5%  YES\n  total_tokens_per_task              2034         4670    +129.7%  YES\n  p95_latency_ms                   3193ms       8536ms    +167.3%  YES\n  tool_calls_per_task               1.333            3    +125.0%  YES\n  retrieval_hops_per_task               1        2.333    +133.3%  YES\n  success_rate                      1.000        1.000      +0.0%  no\n\nbaseline run run-8231bf5f8d62 -- per case:\n  case              cost_usd   tokens  tools  hops       ms  trace_id\n  exchange           0.00284     2165      2     1     3047  2f0941eab3e2976208bfa0287cd690a4\n  backorder          0.00274     2137      2     1     3193  bf4a041b6a575385df248e5763d03bb2\n  late-refund        0.00248     1978      1     1     2976  160be065606a50682f7b158729105aba\n  damaged-item       0.00246     2016      1     1     2178  2ead7f4cd8fb58814f3a6acba4d218d4\n  order-status       0.00242     1942      1     1     2419  dbce51b859621b91f73ed93a1e50465d\n  refund-policy      0.00241     1963      1     1     2870  4ecc1d06e71930f65a6297850b60df5d\n\ncandidate run run-1b7a2c64a25f -- per case:\n  case              cost_usd   tokens  tools  hops       ms  trace_id\n  damaged-item       0.00946     7116      4     3     8536  b8b22f32b4436032d3d66d60bb232d8c\n  late-refund        0.00901     6760      4     3     7936  0c228f52f298f5f6211adc7269715f2f\n  exchange           0.00898     6756      4     3     7999  1500ab1da5dc2549e6e745e8c6911c1e\n  backorder          0.00411     2661      3     2     4297  caf22eb98fb880c1c43cd59b729e54ea\n  refund-policy      0.00389     2530      2     2     4060  99b11f20a15e59252d158709a7ab0c25\n  order-status       0.00300     2198      1     1     3181  ba146d03cb30bcb720e5daec172f30a9\n\ndiffer notes:\n  - baseline `e0592cf8` has 3 runs; used the most recent (`run-8231bf5f8d62`).\n  - candidate `59607e52` has 4 runs; used the most recent (`run-1b7a2c64a25f`).\n\nInvestigate this regression in SigNoz and give the diagnosis.",
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are Preflight's diagnosis agent. A CI gate has just failed a pull request because the AI agent under test got measurably worse, and a reviewer needs to know why in plain English.\n\nYour only source of facts is the SigNoz MCP server, through the two tools you have been given. You cannot read the repository. Do not guess at file contents; reason from the telemetry.\n\nThe golden suite emits ONE TRACE PER CASE. Span attributes you can filter, group and aggregate on:\n\n  eval.run_id, eval.case_id            which run and which case\n  preflight.span_role                  case | llm | tool | retrieval\n  preflight.cost_usd                   USD, on each llm span\n  gen_ai.usage.input_tokens            on each llm span\n  gen_ai.usage.output_tokens           on each llm span\n  gen_ai.request.model                 on each llm span\n  gen_ai.tool.name                     on each tool span\n  preflight.retrieval.source           on each retrieval span\n\nCRITICAL FILTER RULE: in a `filter` expression an unqualified key resolves to the RESOURCE attribute, not the span attribute, and silently matches nothing. Always write `attribute.eval.run_id = '...'`, `attribute.eval.case_id = '...'`, `attribute.preflight.span_role = 'llm'`. In `groupBy` and `aggregateOn` the bare name is correct -- qualify only inside `filter`.\n\nThe time window is injected for you. Never pass start, end or timeRange.\n\nWork efficiently: you have at most 6 turns and each tool result is truncated, so ask precise questions rather than dumping data. A good investigation is roughly: aggregate the metric that breached by case across both runs to find the worst case, then look at what changed structurally in that case -- span roles, tool names, retrieval sources, token split.\n\nWhen you are done, reply with NO tool call and give the final diagnosis as 3-6 plain sentences that:\n  1. name the single worst case and the metric(s) that regressed, with numbers;\n  2. say what changed in the agent's behaviour (extra hops, extra tool calls, larger prompts, a different model) and cite the span evidence;\n  3. state the most likely root cause in the pull request, and say plainly if the telemetry cannot distinguish between two causes.\nDo not hedge with \"may\" or \"might\" where the spans are unambiguous. Do not recommend fixes; a reviewer wants the finding.\n",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Aggregate golden-suite spans in SigNoz. count/sum/avg/min/max/p95 over a numeric span attribute (aggregateOn, e.g. gen_ai.usage.input_tokens), filtered by a filter expression and grouped by attribute\u2026",
+        "input_schema": {
+          "properties": {
+            "aggregateOn": {
+              "description": "Field name to aggregate on (e.g., 'duration_nano'). Required for all aggregations except count and rate.",
+              "type": "string"
+            },
+            "aggregation": {
+              "description": "Aggregation function to apply. One of: count, count_distinct, avg, sum, min, max, p50, p75, p90, p95, p99, rate",
+              "type": "string"
+            },
+            "filter": {
+              "description": "Filter expression using SigNoz search syntax (see signoz://traces/query-builder-guide). Combine conditions with AND, OR, and parentheses for precedence. Unknown keys har\u2026",
+              "type": "string"
+            },
+            "groupBy": {
+              "description": "Comma-separated list of field names to group results by (e.g., 'service.name' or 'service.name, name'). Leave empty for a single aggregate value.",
+              "type": "string"
+            },
+            "limit": {
+              "description": "Maximum number of groups to return (default: 100, max: 10000; higher values are clamped). For time_series queries, groups are ranked across the entire time range, so a s\u2026",
+              "type": "integer"
+            },
+            "orderBy": {
+              "description": "How to order results. Format: '<expression> <direction>', e.g. 'count() desc' or 'avg(duration_nano) asc'. Defaults to the aggregation expression descending.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "aggregation"
+          ],
+          "type": "object"
+        },
+        "name": "signoz_aggregate_traces"
+      },
+      {
+        "description": "Every span of one trace, in order, with names, parents and durations. Use it to read the agent's trajectory for a single case.",
+        "input_schema": {
+          "properties": {
+            "traceId": {
+              "description": "Known trace ID to retrieve. Discover it with signoz_search_traces when the user has not supplied one.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "traceId"
+          ],
+          "type": "object"
+        },
+        "name": "signoz_get_trace_details"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "text": "I'll investigate this regression systematically. The metrics show massive increases across cost, tokens, tool calls, and latency. Let me start by examining the worst-affected cases.",
+        "type": "text"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_01VnLuMA3LrzA4u897kaKZNp",
+        "input": {
+          "traceId": "b8b22f32b4436032d3d66d60bb232d8c"
+        },
+        "name": "signoz_get_trace_details",
+        "type": "tool_use"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_01GrtHBfA3KKKPMmkAcbVp6n",
+        "input": {
+          "traceId": "0c228f52f298f5f6211adc7269715f2f"
+        },
+        "name": "signoz_get_trace_details",
+        "type": "tool_use"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_013CPhES42won4nTjhZ5yD9E",
+        "input": {
+          "traceId": "2ead7f4cd8fb58814f3a6acba4d218d4"
+        },
+        "name": "signoz_get_trace_details",
+        "type": "tool_use"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_01HyyundMLiUij9BmMrNVZjB",
+        "input": {
+          "traceId": "160be065606a50682f7b158729105aba"
+        },
+        "name": "signoz_get_trace_details",
+        "type": "tool_use"
+      }
+    ],
+    "id": "msg_011CdTEQWViRSKH26dymVsq3",
+    "latency_ms": 2457.117,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 2527,
+      "output_tokens": 300
+    }
+  }
+}
