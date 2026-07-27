@@ -1,21 +1,38 @@
-# Video script — Preflight (target 2:45, hard cap 3:00)
+# Video script — Preflight (target 2:50, hard cap 3:00)
 
-Everything below is verified live as of recording prep. **Narration is written to
-be read aloud** — the word counts are timed for a normal speaking pace, so if you
-finish a shot early, hold the frame rather than filling.
+**Read the narration out loud before you record.** It's written the way you'd
+actually talk — short sentences, contractions, no jargon that isn't earned. If a
+line feels stiff in your mouth, say it your own way. The *ideas* in bold below
+are what has to land; the exact words don't.
+
+**The three ideas, in priority order.** If everything else falls apart, land these:
+
+1. A nine-line prompt change made this agent 3× more expensive — and every test passed.
+2. Preflight catches it on the PR, and every number came out of SigNoz. There's no results file — **SigNoz is the datastore**.
+3. Click any row, land on the trace that explains it.
 
 ---
 
 ## Before you hit record
 
+Your stack is up and the dashboards are applied, so `make up` and
+`make signoz-apply` are already satisfied. The other two aren't prerequisites —
+they're shots. But **pre-run them anyway**:
+
 ```bash
-make up                                   # stack healthy
-make signoz-apply                         # dashboards present
-make ci-local BRANCH=seeded-regression    # warms traces so links resolve; exits 1
-make m6-check                             # note the trace URL it prints
+make ci-local BRANCH=seeded-regression    # ~2-3 min. Warms the worktrees.
+make m6-check                             # 30s. Note the trace URL it prints.
 ```
 
-**Open these tabs, in this order** (so you can move left-to-right, no fumbling):
+Two reasons. It's your rehearsal, and it makes the on-camera runs fast — the
+worktrees and the `uv` cache are warm the second time.
+
+⚠️ **Timing reality:** `make ci-local` takes 2–3 minutes and shot 4 is 36
+seconds. `make m6-check` takes 30 seconds against shot 5's 34. **Start the
+command on camera, then cut to the finished output.** Standard demo edit, nobody
+blinks. Don't try to run either one live in full.
+
+**Open these tabs, in this order** (so you move left-to-right, no fumbling):
 
 | Tab | URL |
 |---|---|
@@ -24,133 +41,137 @@ make m6-check                             # note the trace URL it prints
 | 3 | Terminal, in the repo, cleared, large font |
 | 4 | http://localhost:8080/dashboard/019fa222-031a-7831-8118-4f74ac580124 (Cost per Task by Commit) |
 
-> ⚠️ **Never click a trace link inside the GitHub comment on camera.** CI stands up
-> its own SigNoz inside the runner and tears it down when the job finishes — those
-> trace IDs no longer exist. Every clickable link in this script comes from
+> ⚠️ **Never click a trace link inside the GitHub comment on camera.** CI stands
+> up its own SigNoz inside the runner and tears it down when the job finishes —
+> those trace IDs no longer exist. Every clickable link in this script comes from
 > `make ci-local` or `make m6-check`, against your local stack. Verified.
 
 ---
 
-## Shot 1 — the innocent PR · 0:00–0:22 · Tab 1
+## Shot 1 — the problem, then the PR · 0:00–0:30 · Tab 1
 
-**On screen:** the Files-changed view. Nine lines of a system prompt. Scroll
-slowly so the diff is legible, then scroll to the green checks.
+**On screen:** start on the Files-changed view. Scroll the nine-line prompt diff
+slowly enough to read, then scroll down to the green checks and let them sit.
 
-> "This pull request makes a customer-support agent a bit more thorough. It's a
-> nine-line prompt change. The tests pass, lint is clean — I'd approve this."
+> "This is a customer-support agent. Someone's opened a pull request that changes
+> nine lines of its prompt — basically, *be more thorough before you answer.*"
 
-*(beat)*
+*(scroll to the green checks)*
 
-> "It also makes the agent three times more expensive per task. That's not in the
-> diff, and nothing in normal CI has an opinion about it."
+> "Tests pass. Lint's clean. I'd approve this."
+
+*(beat — this is the turn)*
+
+> "But it now costs three times more per question, and it's calling a tool it's
+> never touched. None of that is in the diff, and nothing in normal CI has an
+> opinion about it. You'd find out in next month's bill."
 
 ---
 
-## Shot 2 — the gate catches it · 0:22–0:52 · Tab 2
+## Shot 2 — the gate catches it · 0:30–1:00 · Tab 2
 
 **On screen:** scroll to the red **Preflight** check, then to the bot comment.
-Let the table hold still for a good three seconds — this is the money shot. Don't
-narrate over the pause.
+Let the table hold still for a good three seconds. **This is the money shot —
+don't narrate over the pause.**
 
-> "Preflight is a CI gate for agent behaviour. Here's what it posted."
+> "Preflight is a CI check for agent behaviour. It ran the same six tasks against
+> both sides of this pull request. Here's what it posted."
 
-*(hold — let them read)*
+*(hold — let them read the table)*
 
-> "Cost per task up a hundred and fifty percent. Twice the retrieval hops. And
-> it's calling a tool it never touched before. Five metrics breached, the check
-> fails, and the PR is blocked."
-
----
-
-## Shot 3 — the design bet · 0:52–1:18 · Tab 3
-
-**On screen:** run this, and let the JSON sit there while you talk.
-
-```bash
-cat preflight/query.py | sed -n '/def scalar/,/^        }/p' | head -30
-```
-
-*(or just scroll `preflight/query.py` — the point is the query shape)*
-
-> "Every number in that comment came out of SigNoz's query API. There's no
-> results file, no JSON artifact — SigNoz **is** the datastore for the gate."
-
-> "The whole design rested on one question: can the query API group by a custom
-> span attribute? Not a resource attribute — an arbitrary `eval.case_id` I made
-> up. It can. That's one row per case, per commit, in a single round trip, and
-> everything else follows from it."
+> "Cost per task, up a hundred and fifty percent. Twice the retrieval hops. And a
+> tool call that wasn't there before. Five metrics breached, so the check fails
+> and the PR is blocked."
 
 ---
 
-## Shot 4 — the same gate, locally, with working links · 1:18–1:55 · Tab 3 → browser
+## Shot 3 — why SigNoz · 1:00–1:22 · Tab 3
 
-**On screen:** run it. Let it scroll. When the comment renders, **click a per-case
-trace link** — pick `damaged-item`, the biggest mover.
+**On screen:** scroll `preflight/query.py` slowly. The point is the *shape* of
+the query, not any specific line — nobody's reading it, they're seeing that a
+query exists where a JSON file would be.
+
+> "Here's the design bet. There's no results file. Every number in that comment
+> came back out of SigNoz's query API."
+
+> "The agent already emits traces, so the trace store already has everything the
+> gate needs. Writing a second copy to a JSON file would just drift. SigNoz **is**
+> the datastore for the gate, not a dashboard bolted on the side."
+
+*(If you're running long, cut the second paragraph down to the last sentence.)*
+
+---
+
+## Shot 4 — the same gate, locally, with links that work · 1:22–1:58 · Tab 3 → browser
+
+**On screen:** start the command, **cut to the rendered comment**. Then click a
+per-case trace link — pick `damaged-item`, the biggest mover.
 
 ```bash
 make ci-local BRANCH=seeded-regression
 ```
 
-> "Same gate, run locally. It checks out the merge base and the branch head, runs
+> "Same gate, running locally. It checks out the merge base and my branch, runs
 > the suite against each, and diffs them."
 
-*(when the table appears)*
+*(cut to the table)*
 
-> "Identical comment. And every row links to that case's trace…"
+> "Same comment. And every row links to that case's trace…"
 
 *(click the `damaged-item` trace link → SigNoz waterfall opens)*
 
-> "…straight to the waterfall. There's the agent's run — the model calls, the
-> tool calls, the retrieval hop. The span that explains the regression is one
-> click from the pull request."
+> "…and there's the actual run. The model calls, the tool calls, the extra
+> lookup. The span that explains the regression is one click from the pull
+> request."
 
-**If the link 404s:** you skipped `make ci-local` in prep, or the stack restarted.
-Re-run it and use a trace ID from the fresh output.
+**If the link 404s:** the stack restarted since your prep run. Re-run
+`make ci-local` and use a trace ID from the fresh output.
 
 ---
 
-## Shot 5 — the full circle · 1:55–2:28 · Tab 3 → browser
+## Shot 5 — an agent debugging an agent · 1:58–2:32 · Tab 3 → browser
 
-**On screen:** run it, let the diagnosis text render, then open the trace URL it
-prints at the end.
+**On screen:** start the command, cut to the rendered diagnosis, then open the
+trace URL it prints at the end.
 
 ```bash
 make m6-check
 ```
 
-> "When the gate fails, a diagnosis agent investigates — over the SigNoz MCP
-> server."
+> "When the gate fails, a second agent goes and investigates — over the SigNoz
+> MCP server."
 
-*(when the diagnosis text appears, pause and let it read)*
+*(cut to the diagnosis text, pause and let it read)*
 
-> "It names the worst case, quotes the deltas, and cites a tool and a retrieval
-> source that appear nowhere in its prompt. Those exist only as span attributes —
-> so it could only have got them by querying SigNoz."
+> "It names the worst case and quotes the deltas. But look — it mentions a tool
+> and a knowledge source that appear nowhere in its prompt. Those only exist as
+> span attributes. It could only have got them by querying SigNoz."
 
 *(open the printed trace URL → SigNoz waterfall of `preflight-diagnose`)*
 
-> "And its own investigation is a trace in SigNoz. Twenty-two spans — its
-> reasoning turns, and every MCP call it made. An agent debugging an agent, both
-> observable in the same place."
+> "And its own investigation is a trace too. Twenty-two spans. An agent debugging
+> an agent, both observable in the same place."
+
+⚠️ **The trace ID changes on every run.** Read it off the terminal during the
+take — don't pre-write it.
 
 ---
 
-## Shot 6 — dashboards and alerts as code · 2:28–2:42 · Tab 4
+## Shot 6 — dashboards and alerts as code · 2:32–2:44 · Tab 4
 
-**On screen:** the Cost per Task by Commit dashboard. Scroll once.
+**On screen:** the Cost per Task by Commit dashboard. One slow scroll.
 
-> "Dashboards and alert rules are committed JSON, applied idempotently through
-> the MCP server. Delete one from the UI, run `make signoz-apply`, and it comes
-> back identical."
+> "Dashboards and alert rules are committed JSON, applied through the MCP server.
+> Delete one from the UI, run `make signoz-apply`, and it comes back identical."
 
 ---
 
-## Shot 7 — close · 2:42–2:55 · back to Tab 2
+## Shot 7 — close · 2:44–2:55 · back to Tab 2
 
 **On screen:** the red check at the top of the PR.
 
 > "Nine lines of prompt. Five breached metrics. Caught on the pull request that
-> caused it, with the span that explains it one click away."
+> caused it, with the trace that explains it one click away."
 
 *(beat)*
 
@@ -160,18 +181,18 @@ make m6-check
 
 ## Notes for the edit
 
-- **Shot 2 is the one that sells it.** If you're over three minutes, cut narration
-  from shots 3 and 6, never from shot 2.
-- If shots 4 and 5 run slow live, **pre-run them and cut to the finished output** —
-  nobody needs to watch `uv sync`.
-- If you need 20 seconds back: shot 6 can drop to a 4-second silent pan with no
-  narration, and shot 3 can lose its second paragraph.
-- Say **"SigNoz"** clearly in shots 3, 5 and 6 — "Best Use of SigNoz" is a judged
-  criterion and the audio is evidence.
-- Don't say "we" — you're solo, and the AI-assistance disclosure is in the README
-  and the form where it belongs.
+- **Shot 1's turn and shot 2's table are the video.** Everything else is
+  supporting evidence. If you're over three minutes, cut from 3 and 6 — never
+  from 1 or 2.
+- Shot 6 can drop to a 4-second silent pan with no narration. That's 10 seconds
+  back if you need it.
+- Say **"SigNoz"** clearly in shots 3, 5 and 6. "Best Use of SigNoz" is a judged
+  criterion and your audio is the evidence.
+- Don't say "we" — you're solo. The AI-assistance disclosure lives in the README
+  and the form, which is where it belongs.
+- Don't apologise for cuts or say "I pre-ran this." Just show the output.
 
 ## Word count
 
-~330 words of narration ≈ 2:15 spoken, leaving ~40s of held frames and pauses.
-That is deliberate: the tables need silence to be read.
+~360 words of narration ≈ 2:20 spoken, leaving ~35s of held frames and pauses.
+That's deliberate — the tables need silence to be read.
