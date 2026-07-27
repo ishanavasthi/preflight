@@ -8,7 +8,8 @@ export PATH := $(HOME)/.local/bin:/Applications/OrbStack.app/Contents/MacOS/xbin
 
 .PHONY: help up down logs bootstrap install run query check clean \
         report-sample verify-links lint-ci ci-local \
-        signoz-apply signoz-apply-check signoz-verify-panels signoz-diff
+        signoz-apply signoz-apply-check signoz-verify-panels signoz-diff \
+        explain explain-dry m6-check m6-check-live mcp-tools
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -110,3 +111,34 @@ ci-local: ## Dry-run the CI gate locally: make ci-local BRANCH=seeded-regression
 	git worktree remove --force /tmp/pf-ci-base; \
 	git worktree remove --force /tmp/pf-ci-cand; \
 	exit $$code
+
+# --- M6: the diagnosis agent over MCP ---------------------------------------
+# The gate says a PR made the agent worse. This says *why*, in English, using
+# the SigNoz MCP server as its only source of facts -- and its own investigation
+# lands in SigNoz as a trace, which is the milestone's whole point.
+#
+# BUILD_PLAN calls this `preflight explain`; it ships as `python -m
+# preflight.diagnose` because preflight/cli.py was frozen while M6 was built.
+# Wiring it into the CLI is a one-line `cli.add_command` follow-up.
+
+BASELINE ?= e0592cf84cc63ee4f3a6c1d0435b42d48df52728
+CANDIDATE ?= 59607e52008b29a41f9722671f3e7a4f61914b61
+
+mcp-tools: ## List every tool the SigNoz MCP server advertises
+	@set -a && . ./.env && set +a && uv run python -m preflight.mcp list
+
+explain: ## Diagnose a failed gate: make explain BASELINE=<sha> CANDIDATE=<sha>
+	@set -a && . ./.env && set +a && \
+	uv run python -m preflight.diagnose --baseline $(BASELINE) --candidate $(CANDIDATE)
+
+explain-dry: ## Print the diagnosis prompt + MCP tool surface; call no model ($0)
+	@set -a && . ./.env && set +a && \
+	uv run python -m preflight.diagnose --baseline $(BASELINE) --candidate $(CANDIDATE) --dry-run
+
+m6-check: ## M6 acceptance check: force a failure, explain it, prove the explainer is traced
+	@set -a && . ./.env && set +a && uv run python scripts/m6_check.py
+
+# Same check, but the investigation is re-run against the live API instead of
+# replayed. This is how .cassettes-diagnose/ was recorded. ~$0.06 of Haiku.
+m6-check-live: ## M6 check with a fresh, live investigation (costs ~$0.06)
+	@set -a && . ./.env && set +a && uv run python scripts/m6_check.py --live
