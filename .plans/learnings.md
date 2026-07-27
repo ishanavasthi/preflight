@@ -4,6 +4,121 @@ Newest first.
 
 ---
 
+## 2026-07-27 — M5: dashboards and alerts as code, through MCP; and the metrics read path cracked
+
+**What changed.** Four dashboards (24 panels) and two alert rules, committed as
+JSON under `dashboards/` and `alerts/`, reconciled onto SigNoz by
+`make signoz-apply`. Everything goes through the **SigNoz MCP server** — 42
+tools, full dashboard and alert CRUD — so BUILD_PLAN's M5 shortcut is a true
+submission claim and not an aspiration. `make signoz-verify-panels` executes
+every committed panel query and reports 27/27 returning real data;
+`make signoz-apply-check` is the acceptance check, automated.
+
+**The M5 check, run:**
+
+        [2/5] delete preflight-tool-trajectory (id=019fa222-0326-...)
+               confirmed gone -- 3/4 preflight dashboards remain
+        [3/5] make signoz-apply (re-apply from the committed JSON)
+               tool-trajectory.json: created  019fa225-616b-...
+        [4/5] diff the restored definition against the snapshot
+               identical: 7902 bytes of definition match exactly
+        [5/5] idempotency: apply again, assert nothing is created
+               converged -- every dashboard updated in place, none created
+        PASS: the committed JSON is the source of truth for SigNoz
+
+**The headline finding: M2's "metrics don't read back" was a metric-type
+auto-detection problem, not a shape problem.** M2 timeboxed this after trying the
+base name, `.sum` and `.bucket`, with and without `temporality: Cumulative`, and
+several `spaceAggregation` values — all zero rows, with the data plainly visible
+in ClickHouse. The missing move was to stop letting SigNoz infer the type.
+SigNoz catalogues `preflight.case.*` as `Histogram / Cumulative / isMonotonic`,
+and a query that auto-fetches that metadata takes a histogram-percentile path
+that returns **zero rows while still scanning 48,527 of them** — the scan count
+is the tell, and it is the thing to look at when a query is empty but not fast.
+The recipe that works:
+
+        metricName:       preflight.case.cost_usd.sum   # the suffixed series, not the base
+        metricType:       gauge                          # explicit; do NOT let it auto-fetch
+        timeAggregation:  max                            # explicit
+        spaceAggregation: sum
+
+Cross-checked against the trace-derived total for the same commit: **$0.0769
+both ways**, exactly. Two transferable lessons. First, `rowsScanned > 0` with an
+empty result set means the filter matched and the *aggregation* dropped
+everything — a completely different bug from `rowsScanned == 0`, and the two are
+indistinguishable if you only look at the row count. Second, a backend that
+helpfully auto-detects schema will auto-detect you into a dead end; when a query
+returns nothing, pin every inferred parameter explicitly before concluding the
+data is unreachable.
+
+**And then the dashboards read traces anyway.** Cracking it did not change the
+design, which is worth being honest about. The gate reads traces
+(`run_summary_typed`), so a trace-backed dashboard cannot disagree with the PR
+comment, while a metrics-backed one can — and the day those two numbers diverge
+in front of a reviewer, the gate is finished. Trace aggregation also has no
+temporality or bucket-alignment subtleties, and I had verified the metrics path
+for one query, not for twenty-four panels. Solving a blocker and then not
+depending on it is a legitimate outcome; the finding is in DECISIONS.md so
+nobody claims "metrics dashboards" on the strength of it.
+
+**Gotcha: a `name` that looks exactly like an idempotency key, and isn't.**
+SigNoz dashboards carry a top-level `name` slug. Posting the identical payload
+twice creates **two dashboards** with the same `name` and different UUIDs. So
+`make signoz-apply` reconciles rather than upserts: list, match on `name`, update
+in place by `id`, and delete stale duplicates so the deployment converges on git.
+The same shape applies to alert rules, matched on their `alert` title.
+
+**Gotcha inside that one, and it fails silently:** `signoz_list_alert_rules`
+returns the rule UUID as **`ruleId`**, while `signoz_create_alert` returns it as
+`id` and `signoz_update_alert` expects `id`. Reading `id` off a listing yields
+`None`; the update then targets nothing and still reports success. Caught only
+because a debug print showed `id=None` next to a rule that was demonstrably
+firing. Same family as M1's stale-auth trap: the call succeeded, so nothing drew
+attention to it.
+
+**Four payload shapes the MCP tool schema does not describe.** The published
+`inputSchema` is a faithful rendering of the Go types and still leaves these to
+be discovered by 400. Probing for them took four cycles and no reading would
+have shortened it:
+
+1. `schemaVersion` must be `"v6"` — typed as a bare string with no enum.
+2. The grid is **12 columns wide in total**, not 24, so a half-width panel is
+   `width: 6`.
+3. **Table panels format per column** (`columnUnits`, alias → unit) and reject a
+   bare `unit` with *"json: unknown field"*. Every other panel type takes `unit`.
+4. **A panel accepts exactly one query entry.** Multi-query maths goes inside a
+   single `signoz/CompositeQuery` plugin carrying the input `builder_query`
+   specs plus a `builder_formula` — not three sibling entries, which fails with
+   *"panel must have one query"*.
+
+**Takeaway: verify a dashboard the way you verify a link.** M4's lesson was that
+a SigNoz 200 proves nothing because the SPA answers 200 to everything, so you
+ask the API the page calls to render itself. Dashboards have the identical
+failure mode one level up: a panel with a subtly wrong filter renders perfectly
+and is simply empty, indistinguishable from a healthy panel on a quiet system.
+`make signoz-verify-panels` therefore re-executes every committed panel query
+through `/api/v5/query_range` — **using each panel's own declared request type**,
+because scalar and time_series return different shapes (`results[].data` versus
+`results[].aggregations[].series[]`) and counting the wrong one reads as zero.
+Panels that are *legitimately* empty are listed in an `ALLOW_EMPTY` table with a
+written reason, so "no rows" stays a hard failure everywhere else. That check is
+what found the one real defect in the set.
+
+**Thresholds measured, not guessed — same as M3.** Baseline cost per task is
+$0.00255 and the seeded regression $0.00550, so the burn-rate ceiling sits at
+$0.004: it fires on the regression and stays quiet on `main`. Verified live —
+the cost rule sat in `firing` and the tool-error rule in `inactive` at the same
+moment. The tool-error rule being quiet is the correct outcome, not a gap: no
+tool span has ever errored here, and expressing it as a rate rather than a count
+is what keeps one flaky call from paging anybody.
+
+**Cost: $0.00.** Nothing in M5 calls a model. The two suite runs that produced
+the dashboard data ran under `PREFLIGHT_REPLAY=1` off committed cassettes, which
+is the whole point of M2's cassette design paying rent three milestones later.
+Total project spend is still $0.1123 of $1.00.
+
+---
+
 ## 2026-07-27 — M2/M3/M4 integrated: three milestones built in parallel, verified together
 
 **What changed.** M2, M3, and M4 were built concurrently by three agents in one

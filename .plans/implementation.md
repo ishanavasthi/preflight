@@ -8,7 +8,7 @@
 | M2 | Golden suite + full instrumentation | **Done** — check passed (two SHAs, one query grouped by `vcs.commit_sha`, two rows with different token totals) |
 | M3 | Differ + gate | **Done** — check passed (exit 1 with the cost delta named, exit 0 on a clean re-run; regression proven with synthetic runs through real SigNoz, see DECISIONS.md) |
 | M4 | GitHub Action + PR comment (*demo complete here*) | **Built** — validated locally end to end (`make ci-local` exits 1, all 6 deep links resolve); awaiting the real PR, which the human opens |
-| M5 | Dashboards + alerts as code | Not started |
+| M5 | Dashboards + alerts as code | **Done** — check passed (dashboard deleted, `make signoz-apply` restored it byte-identically; 27/27 panel queries return real data) |
 | M6 | Diagnosis agent over MCP | Not started |
 | M7 | Ship — README, video, blog, submission form | Not started |
 
@@ -110,6 +110,27 @@ regression verdict.
 sequence on a laptop and exits with the gate's code; `make verify-links` proves
 the deep links resolve; `make lint-ci` runs actionlint + shellcheck.
 
+**Dashboards and alerts as code.** Four dashboards (`dashboards/*.json`, 24
+panels) and two alert rules (`alerts/*.json`) are committed and reconciled onto
+SigNoz by `make signoz-apply`, which drives the **MCP server**, not the REST API.
+The committed JSON *is* the MCP tool argument, so there is no payload
+translation layer to drift out of sync.
+
+| File | Shows |
+|---|---|
+| `dashboards/agent-health.json` | Success rate, cost per run, p95 case latency, errored spans, run shape (cases + mean spans/tool calls/hops), token totals — all by commit |
+| `dashboards/cost-per-task.json` | The gated metric itself: a `A/B` formula panel (LLM cost ÷ case count), per-case cost table, tokens per task, cost share by model, LLM turns |
+| `dashboards/tool-trajectory.json` | Calls by `gen_ai.tool.name`, tool × commit breakdown, retrieval hops, tool errors, mean tool result size |
+| `dashboards/case-latency.json` | p95/avg/max per golden case, the case × commit latency grid, p95 LLM call latency, tokens and spans per case |
+| `alerts/cost-per-task-burn-rate.json` | Cost per task above $0.004 (critical). Baseline is $0.00255, the seeded regression $0.00550 — so it fires on the regression and stays quiet on `main` |
+| `alerts/tool-error-rate.json` | Errored tool spans above 5% of all tool spans (error). Quiet on a healthy suite, by design |
+
+`make signoz-verify-panels` executes every committed panel query against
+`/api/v5/query_range` using each panel's own declared request type and fails if
+one returns nothing — an empty panel and a broken panel look identical in the UI,
+so this is the only thing that tells them apart. `make signoz-apply-check` is the
+M5 acceptance check. `make signoz-diff` reports what apply would change.
+
 ## Integrations
 
 | Integration | Where | Notes |
@@ -117,7 +138,7 @@ the deep links resolve; `make lint-ci` runs actionlint + shellcheck.
 | SigNoz query API v5 | `preflight/query.py` | Source of truth for the gate |
 | OTLP/HTTP | `preflight/otel.py` | Traces, metrics **and logs** to `:4318` |
 | Foundry | `casting.yaml` | Deployment reproducibility (Field Req 3) |
-| SigNoz MCP server | port 8000, enabled | Wired up; used in M5/M6 |
+| SigNoz MCP server | port 8000, enabled | 42 tools. **M5 applies all dashboards and alerts through it** (`scripts/signoz_apply.py`); also used by M6 |
 | Anthropic API | `preflight/replay.py` | `anthropic` SDK, `claude-haiku-4-5-20251001` only. Every call gated by `preflight/budget.py` against a $1 cap; total M2 spend $0.1123 / 69 calls |
 | Cassette replay | `.cassettes/` (committed) | 12 baseline + 21 on `seeded-regression`. Default execution path — CI and a fresh clone run the suite offline and free |
 | GitHub Actions | `.github/workflows/preflight.yml` | `pull_request` gate; SigNoz forged in-job, sticky PR comment via `actions/github-script`, zero API spend (`PREFLIGHT_REPLAY=1`). `gh` authed as `ishanavasthi` |
@@ -134,14 +155,21 @@ Preflight's own: `eval.run_id`, `eval.case_id`, `vcs.commit_sha`,
 
 ## Known gaps
 
-- **Metrics are emitted but not yet readable through the query API.** All six
-  `preflight.case.*` histograms land in ClickHouse with the right names and
-  labels, but SigNoz splits histograms into `.bucket` / `.count` / `.sum` /
-  `.min` / `.max` and registers only `.bucket` as `type = Histogram`. Every
-  `signal: "metrics"` query attempted through `/api/v5/query_range` returned
-  zero rows. Read-path shape only — the emit side is verified. Belongs to M5,
-  which builds dashboards through the SigNoz MCP server anyway. **The gate does
-  not depend on it:** M3 reads traces via `run_summary_typed`.
+- ~~**Metrics are emitted but not yet readable through the query API.**~~
+  **Resolved in M5.** The blocker was never the emit side or the suffix split —
+  it was metric-type *auto-detection*. SigNoz records `preflight.case.*` as
+  `type = Histogram, temporality = Cumulative, isMonotonic = true`, and a query
+  that lets it auto-fetch that metadata applies a histogram percentile path that
+  returns zero rows even while scanning 48k of them. Querying the `.sum` /
+  `.count` series with an **explicit** `metricType: "gauge"` and an explicit
+  `timeAggregation` returns correct data, cross-checked exactly against the
+  trace-derived total ($0.0769 both ways for commit `3ece0367`). See
+  learnings.md for the full recipe.
+
+  **The M5 dashboards still read traces, deliberately** — the gate's own source
+  of truth, so a dashboard number and a PR-comment number cannot disagree, and
+  trace aggregation has no temporality or bucket-alignment traps. The metrics
+  path is now known-good but nothing depends on it.
 - **Tool-call trajectory divergence** in the sequence sense is not implemented —
   `tool_calls_per_task` counts calls, it does not notice a reordering. Say
   "tool-call volume" in the submission.

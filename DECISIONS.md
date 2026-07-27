@@ -441,3 +441,161 @@ totals differ only if the code differs. The check was therefore run as baseline
 (`main`) versus the seeded regression, which is the comparison CI actually makes
 and closes M3's own check deviation as a side effect. Both rows came back from
 one query: 32 spans / 12,201 tokens versus 59 spans / 28,021 tokens.
+
+---
+
+## M5 — Dashboards + alerts as code
+
+### MCP, not REST — and the shortcut paid off
+
+BUILD_PLAN's M5 note says to build dashboards and alerts *through the SigNoz MCP
+server* rather than reverse-engineering REST payloads, and flags that "we used
+MCP for dashboards" is a submission claim that must be true. **It is true.**
+Every dashboard and alert in this repo is created, updated and deleted through
+`http://localhost:8000/mcp`; `scripts/signoz_apply.py` makes no REST call at
+all. The only REST left in M5 is `make signoz-verify-panels`, which deliberately
+re-executes each panel's query through the *same* `/api/v5/query_range` the CI
+gate uses — the point of that step is to confirm the dashboards and the gate see
+identical numbers, so it has to use the gate's client.
+
+The server exposes **42 tools**, including full dashboard CRUD and alert
+create/update/delete, as the plan promised. The payoff was concrete: the tool
+arguments are the dashboard objects themselves, so `dashboards/*.json` is the
+literal MCP argument rather than a shape this repo has to translate. There is no
+adapter layer that can drift.
+
+`scripts/mcp_client.py` is a ~100-line hand-rolled client rather than the `mcp`
+SDK. The apply path needs exactly three methods — `initialize`, `tools/list`,
+`tools/call` — and the SigNoz server is stateless (it returns no
+`Mcp-Session-Id`), so there is no session to manage. It lives under `scripts/`
+because **M6 owns `preflight/mcp.py`**; if that lands with an equivalent client,
+this one can be deleted and `signoz_apply.py` re-pointed at it.
+
+> The plan warned that the server streams and a naive blocking `curl` hangs. In
+> practice it content-negotiates: send `Accept: application/json,
+> text/event-stream` and it answers with plain JSON. `_parse()` handles both
+> anyway, because "it happens to answer JSON today" is not a transport contract.
+
+### Idempotency has to be client-side: `name` is not a unique key
+
+This is the load-bearing finding for `make signoz-apply`. A dashboard has a
+top-level `name` slug that looks exactly like an idempotency key, and is not
+one: **posting the same payload twice creates two dashboards** with the same
+`name` and different UUIDs. Verified directly.
+
+So apply reconciles rather than upserts — list what exists, match on the stable
+identity field, update in place, and delete stale duplicates so the deployment
+converges on git instead of accumulating copies:
+
+| Object | Matched on | Update needs |
+|---|---|---|
+| dashboard | top-level `name` slug | `id` |
+| alert rule | `alert` title | `id` |
+
+**Gotcha inside the gotcha:** `signoz_list_alert_rules` returns the rule UUID as
+**`ruleId`**, while `signoz_create_alert` returns it as `id` and
+`signoz_update_alert` expects `id`. Reading only `id` off a listing yields
+`None`, and the update then targets nothing while still reporting success.
+`Reconciler._rule_id()` accepts both, and apply now refuses to proceed rather
+than silently creating a duplicate if a remote rule has no id at all.
+
+### Four payload shapes the MCP tool schema does not describe
+
+The published `inputSchema` is a faithful description of the Go types and still
+does not tell you these. All four were 400s, found by probing:
+
+1. **`schemaVersion` must be `"v6"`.** The schema says `"type": "string"` with no
+   enum; `"v2"` is rejected outright.
+2. **The grid is 12 columns wide in total, not 24.** A half-width panel is
+   `width: 6`. `x: 12` fails with *"x (12) must be less than grid width 12"*.
+3. **A table panel formats per column.** Its formatting block takes
+   `columnUnits` (alias → unit); a bare `unit` is *"json: unknown field"*. Only
+   non-table panels take `unit`.
+4. **A panel accepts exactly one query entry.** Sending `A`, `B` and a formula as
+   three entries fails with *"panel must have one query"*. Multi-query maths goes
+   inside a single `signoz/CompositeQuery` plugin whose envelope list carries the
+   input `builder_query` specs plus a `builder_formula`. This is how the headline
+   cost-per-task panel computes LLM cost ÷ case count.
+
+### The dashboards read traces, not metrics — deliberately, and not because metrics are broken
+
+M2 left "metrics emit but do not read back" as an open item and handed it to M5.
+**M5 cracked it** (see learnings.md for the recipe: query the `.sum` / `.count`
+series with an explicit `metricType: "gauge"` and an explicit `timeAggregation`,
+because letting SigNoz auto-detect `Histogram/Cumulative/monotonic` is what
+returns zero rows). The result cross-checks *exactly* against the trace-derived
+total — $0.0769 both ways for commit `3ece0367`.
+
+The dashboards still read traces anyway. Two reasons, and neither is "metrics
+don't work":
+
+- **The gate reads traces.** `query.run_summary_typed` is the source of truth for
+  the number that fails someone's PR. A dashboard sourced from the same spans
+  cannot disagree with the PR comment; one sourced from a parallel metrics
+  pipeline can, and the day it does, the gate loses its credibility.
+- **Trace aggregation has no temporality or bucket-alignment traps.** The metrics
+  read path works but is sensitive to how one-point-per-case series fall across
+  step buckets, which is a subtlety I verified for one query and did not want
+  underneath twenty-four panels.
+
+Stated plainly so nobody claims "metrics-backed dashboards" in the submission:
+the dashboards are **trace-backed**. The metric names in `contracts.py` are
+emitted, and now proven readable, but nothing in M5 depends on them.
+
+### Alert thresholds are measured, not guessed
+
+Same discipline as M3's thresholds. Both rules were sized from real runs of the
+suite through real SigNoz:
+
+| | Baseline (`main`) | Seeded regression | Threshold |
+|---|---|---|---|
+| cost per task | $0.00255 | $0.00550 | **$0.004** (critical) |
+| tool error rate | 0% | 0% | **5%** (error) |
+
+The cost rule therefore fires on the regression and stays quiet on `main` —
+verified live, the rule sat in `firing` while the tool-error rule sat in
+`inactive`. Grouping by `vcs.commit_sha` means the notification names the commit.
+
+**The tool-error rule is quiet, and that is the correct outcome, not a gap.** No
+tool span has ever errored in this project. It is expressed as a *rate* rather
+than a raw count because one flaky call in a large run is noise and one in five
+is a broken tool. `make signoz-verify-panels` has an explicit `ALLOW_EMPTY`
+entry for the matching dashboard panel, with the reason written down, so "no
+rows" stays a hard failure everywhere else instead of becoming a shrug.
+
+### New: a notification channel is a prerequisite, so apply creates it
+
+SigNoz rejects an alert rule that references an unknown notification channel, so
+`signoz_apply.py` ensures `preflight-local-webhook` exists before applying the
+rules. It points at `host.docker.internal:9099`, where nothing listens: the rules
+evaluate and fire correctly, they simply cannot deliver. A real deployment
+repoints it at Slack or PagerDuty. SigNoz test-pings a webhook on create and
+reports the failure in the result; that is expected here and is not treated as
+fatal.
+
+### The M5 check is automated, and proves more than the plan asked
+
+BUILD_PLAN's check is "delete a dashboard from the UI, run `make signoz-apply`,
+it comes back identical". Doing that by hand proves it once.
+`make signoz-apply-check` proves it on demand, and proves the stronger claim —
+not that *a* dashboard reappears, but that the definition which comes back is
+byte-identical to the one destroyed, ignoring only the fields the server owns
+(UUID and timestamps). It then applies a third time and asserts nothing was
+created, which is the idempotency half. Output in learnings.md.
+
+### Not done in M5
+
+- **No `signoz-apply` step in CI.** The workflow stands up a fresh SigNoz per
+  job, so applying dashboards there would decorate a deployment that is torn
+  down minutes later. Apply is a local/operator command. Wiring it into CI is a
+  one-line addition if a persistent SigNoz ever exists.
+- **`webUrl` values are not usable from a browser as returned.** The MCP server
+  builds them from the container-internal hostname
+  (`http://signoz-signoz-0:8080/dashboard/<uuid>`). The MCP server's own
+  instructions say to use `webUrl` verbatim and never construct links — good
+  advice that happens to be wrong for a Foundry compose deployment reached from
+  the host. Swap the host for `localhost:8080`; the UUID path is correct.
+- **Dashboard JSON is hand-maintained.** It was authored with a throwaway
+  generator for consistency, which was not kept: a committed generator would
+  make the JSON a build artifact and give the repo two sources of truth for the
+  same object. `make signoz-verify-panels` is what catches a hand-edit mistake.
