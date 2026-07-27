@@ -4,6 +4,51 @@ Newest first.
 
 ---
 
+## 2026-07-27 — M7: verifying the submission claims, and a metric that looked broken
+
+**What changed.** README rewritten to open with the problem rather than the
+architecture, and `SUBMISSION.md` written with the form answers and a shot-by-shot
+video plan. The rule applied throughout was BUILD_PLAN's: *"Delete any bullet you
+didn't reach — judges re-run Foundry and look."* So every claim was checked against
+the code, not the plan. Two turned out to need correction (the agent has three
+tools, not two; the diagnosis trace id changes on every replay so pinning one in
+the README would send a judge hunting for a trace that isn't in their SigNoz), and
+one *looked* false and wasn't.
+
+**The near-miss: an OTel histogram is not queryable under its own name.** Checking
+the "we emit run-level metrics" claim, `preflight.case.cost_usd` came back with
+
+        "metric preflight.case.cost_usd has never been received.
+         Check the metric name and instrumentation"
+
+which is about as unambiguous as an error message gets. The instrumentation was
+fine. A histogram is decomposed on ingest into separate series —
+`preflight.case.cost_usd.sum`, `.count`, `.bucket`, `.min`, `.max` — and the base
+name exists as *nothing*. Querying `.sum` returns exactly the expected per-case
+values. Confirmed by going under the API to ClickHouse
+(`SELECT DISTINCT metric_name FROM signoz_metrics.distributed_samples_v4`), which
+is the move whenever a query API insists data isn't there: check the store
+directly before believing the reader.
+
+The dangerous part is the *confidence* of the warning. "Has never been received"
+reads as a verdict about your instrumentation, and the obvious response is to go
+rewrite working exporter code. It is actually a statement about a name.
+
+**Two SigNoz response shapes, not one.** Traces come back as
+`results[].columns[]` + positional `results[].data[]`. Metrics come back as
+`results[].aggregations[].series[].values[]` — a different shape entirely.
+`query.py::_flatten_scalar` handles the trace shape only, which is correct for
+the gate but means it silently returns `[]` if pointed at a metrics query. Worth
+knowing before anyone reuses `SigNozClient.scalar()` for metrics.
+
+**Takeaway.** "Verify before you claim" caught two real errors, but its more
+valuable outcome was preventing a *false* retraction. The instinct on seeing that
+warning is to cut the claim and move on, which would have been the honest-seeming
+thing to do and would have been wrong. Verification has to run in both
+directions: not just "is this claim too strong?" but "is this failure real?"
+
+---
+
 ## 2026-07-27 — M6: the diagnosis agent, and what it costs to make a model investigate
 
 **What changed.** `preflight/diagnose.py` takes a failed gate and explains it in
