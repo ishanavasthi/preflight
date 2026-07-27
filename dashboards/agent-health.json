@@ -1,0 +1,418 @@
+{
+  "name": "preflight-agent-health",
+  "schemaVersion": "v6",
+  "tags": [
+    {
+      "key": "project",
+      "value": "preflight"
+    },
+    {
+      "key": "managed-by",
+      "value": "signoz-apply"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "Preflight - Agent Health",
+      "description": "Suite-level health of the reference agent, by commit. Every panel reads the same spans the CI gate reads, so these numbers and the PR comment cannot disagree."
+    },
+    "duration": "1h",
+    "refreshInterval": "1m",
+    "variables": [],
+    "panels": {
+      "success_rate": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Success rate by commit",
+            "description": "avg(preflight.success) over case spans. 1.0 = every golden case met its expectation. The seeded regression holds this at 1.0 -- which is the point: it is a cost regression no correctness test can see."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "percentunit",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "avg(preflight.success)",
+                        "alias": "success_rate"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{vcs.commit_sha}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cost_per_run": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Cost per suite run by commit (USD)",
+            "description": "sum(preflight.cost_usd) over LLM spans. Cost is computed at span-emit time from the price table in preflight.yaml, so it is auditable in the repo."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "usd",
+                "decimalPrecision": "4"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "sum(preflight.cost_usd)",
+                        "alias": "cost_usd"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{vcs.commit_sha}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p95_case_latency": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "p95 case latency by commit",
+            "description": "p95(preflight.duration_ms) over case spans. Wall-clock, so it moves with runner load -- the gate treats it as a smoke signal and gates on cost."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "ms",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "p95(preflight.duration_ms)",
+                        "alias": "p95_ms"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{vcs.commit_sha}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "error_spans": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Errored spans by commit",
+            "description": "Spans with has_error = true. A healthy suite run reports zero; anything above zero means a case threw rather than merely costing more."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "count()",
+                        "alias": "error_spans"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND has_error = true"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{vcs.commit_sha}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "run_shape": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Run shape by commit",
+            "description": "Cases executed, and the mean spans / tool calls / retrieval hops per case. These rollups live on the case span, so one scalar query describes a whole run."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "count()",
+                        "alias": "cases"
+                      },
+                      {
+                        "expression": "avg(preflight.spans)",
+                        "alias": "avg_spans_per_case"
+                      },
+                      {
+                        "expression": "avg(preflight.tool_calls)",
+                        "alias": "avg_tool_calls"
+                      },
+                      {
+                        "expression": "avg(preflight.retrieval_hops)",
+                        "alias": "avg_retrieval_hops"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "tokens_by_commit": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tokens per commit",
+            "description": "sum of the GenAI semconv token attributes. Input tokens dominate: what inflates agent spend is turn count re-sending a growing transcript, not output length."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "sum(gen_ai.usage.input_tokens)",
+                        "alias": "input_tokens"
+                      },
+                      {
+                        "expression": "sum(gen_ai.usage.output_tokens)",
+                        "alias": "output_tokens"
+                      },
+                      {
+                        "expression": "count()",
+                        "alias": "llm_calls"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Preflight - Agent Health",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/success_rate"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/cost_per_run"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/p95_case_latency"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/error_spans"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/run_shape"
+              }
+            },
+            {
+              "x": 6,
+              "y": 12,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/tokens_by_commit"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

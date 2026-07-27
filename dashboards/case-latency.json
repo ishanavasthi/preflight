@@ -1,0 +1,428 @@
+{
+  "name": "preflight-case-latency",
+  "schemaVersion": "v6",
+  "tags": [
+    {
+      "key": "project",
+      "value": "preflight"
+    },
+    {
+      "key": "managed-by",
+      "value": "signoz-apply"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "Preflight - Per-Case Latency",
+      "description": "Latency of each golden-suite case. Cassettes replay the provider's recorded wall time, so these numbers are reproducible rather than sampled."
+    },
+    "duration": "1h",
+    "refreshInterval": "1m",
+    "variables": [],
+    "panels": {
+      "p95_by_case": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "p95 duration by case",
+            "description": "p95(preflight.duration_ms) over case spans grouped by eval.case_id."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2",
+                "columnUnits": {
+                  "p95_ms": "ms",
+                  "avg_ms": "ms",
+                  "max_ms": "ms"
+                }
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "p95(preflight.duration_ms)",
+                        "alias": "p95_ms"
+                      },
+                      {
+                        "expression": "avg(preflight.duration_ms)",
+                        "alias": "avg_ms"
+                      },
+                      {
+                        "expression": "max(preflight.duration_ms)",
+                        "alias": "max_ms"
+                      },
+                      {
+                        "expression": "count()",
+                        "alias": "runs"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "eval.case_id",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "case_duration_over_time": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Case duration over time",
+            "description": "avg(preflight.duration_ms) per case. Each series is one golden case."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "ms",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "avg(preflight.duration_ms)",
+                        "alias": "avg_ms"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "eval.case_id",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{eval.case_id}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "case_latency_by_commit": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "p95 case latency: case x commit",
+            "description": "The cell that changed. p95 duration per case per commit -- the per-case latency view the CI gate summarises into a single p95."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2",
+                "columnUnits": {
+                  "p95_ms": "ms"
+                }
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "p95(preflight.duration_ms)",
+                        "alias": "p95_ms"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      },
+                      {
+                        "name": "eval.case_id",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "llm_span_latency": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "p95 LLM call latency by commit",
+            "description": "p95(duration_nano) over LLM spans -- the intrinsic span duration, not the preflight rollup, so it isolates provider time from harness time."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "ns",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "p95(duration_nano)",
+                        "alias": "p95_ns"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{vcs.commit_sha}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "tokens_by_case": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tokens by case",
+            "description": "Where the token budget goes, per golden case. Pair with the latency table to tell a slow case from an expensive one."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "sum(gen_ai.usage.input_tokens)",
+                        "alias": "input_tokens"
+                      },
+                      {
+                        "expression": "sum(gen_ai.usage.output_tokens)",
+                        "alias": "output_tokens"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "eval.case_id",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "spans_per_case": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Spans per case by commit",
+            "description": "avg(preflight.spans) from the case-span rollup. Span count is the cheapest proxy for trajectory length."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "avg(preflight.spans)",
+                        "alias": "avg_spans"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      },
+                      {
+                        "name": "eval.case_id",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Preflight - Per-Case Latency",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/p95_by_case"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/case_duration_over_time"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/case_latency_by_commit"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/llm_span_latency"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/tokens_by_case"
+              }
+            },
+            {
+              "x": 6,
+              "y": 12,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/spans_per_case"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

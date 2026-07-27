@@ -7,7 +7,8 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:$(PATH)
 
 .PHONY: help up down logs bootstrap install run query check clean \
-        report-sample verify-links lint-ci ci-local
+        report-sample verify-links lint-ci ci-local \
+        signoz-apply signoz-apply-check signoz-verify-panels signoz-diff
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -61,6 +62,27 @@ lint-ci: ## Lint the GitHub workflow (actionlint + shellcheck)
 # merge base and the branch head, the suite run against each in replay mode,
 # then the gate. `make ci-local BRANCH=seeded-regression` should exit 1 with a
 # report; against a branch that changes nothing it should exit 0.
+# --- M5: dashboards and alerts as code --------------------------------------
+# Applied through the SigNoz MCP server, not the REST API. dashboards/*.json and
+# alerts/*.json are the literal MCP tool arguments, so the committed file is the
+# payload -- there is no translation layer to drift.
+
+signoz-apply: ## Apply dashboards/ + alerts/ to SigNoz through MCP (idempotent)
+	@set -a && . ./.env && set +a && uv run python scripts/signoz_apply.py
+
+signoz-diff: ## Show what signoz-apply would change, without changing it
+	@set -a && . ./.env && set +a && uv run python scripts/signoz_apply.py --dry-run
+
+signoz-verify-panels: ## Execute every committed panel query; fail if one returns no data
+	@set -a && . ./.env && set +a && uv run python scripts/signoz_apply.py --verify
+
+# BUILD_PLAN's M5 check, automated: delete a dashboard out from under SigNoz,
+# re-apply, and assert the definition that comes back is byte-identical to the
+# one that was there before. Proves the committed JSON -- not the live
+# deployment -- is the source of truth.
+signoz-apply-check: ## M5 acceptance check: delete a dashboard, re-apply, prove it returns identical
+	@set -a && . ./.env && set +a && uv run python scripts/signoz_apply_check.py
+
 ci-local: ## Dry-run the CI gate locally: make ci-local BRANCH=seeded-regression
 	@test -n "$(BRANCH)" || { echo "usage: make ci-local BRANCH=<branch>"; exit 1; }
 	@set -euo pipefail; \

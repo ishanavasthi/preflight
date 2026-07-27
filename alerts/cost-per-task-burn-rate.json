@@ -1,0 +1,84 @@
+{
+  "alert": "Preflight - agent cost per task burn rate",
+  "alertType": "TRACES_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "schemaVersion": "v2alpha1",
+  "description": "Fires when the reference agent's cost per golden-suite case exceeds the burn-rate ceiling for any commit. This is the same arithmetic the CI gate uses -- sum(preflight.cost_usd) over LLM spans divided by the number of case spans -- so the alert and the PR comment cannot disagree. Grouping by vcs.commit_sha means the notification names the commit that did it.",
+  "labels": {
+    "severity": "critical",
+    "team": "preflight",
+    "signal": "cost"
+  },
+  "annotations": {
+    "summary": "Cost per task is {{$value}} USD on commit {{$labels.vcs_commit_sha}} (ceiling {{$threshold}})",
+    "description": "The agent is spending more per golden-suite case than the burn-rate ceiling allows. Baseline on main is ~$0.00255/task; the seeded regression is ~$0.00550/task. Open the 'Preflight - Cost per Task by Commit' dashboard and compare the per-case table to find which case got expensive."
+  },
+  "preferredChannels": ["preflight-local-webhook"],
+  "evaluation": {
+    "kind": "rolling",
+    "spec": {
+      "evalWindow": "30m",
+      "frequency": "1m"
+    }
+  },
+  "condition": {
+    "selectedQueryName": "F1",
+    "alertOnAbsent": false,
+    "compositeQuery": {
+      "queryType": "builder",
+      "panelType": "graph",
+      "unit": "usd",
+      "queries": [
+        {
+          "type": "builder_query",
+          "spec": {
+            "name": "A",
+            "signal": "traces",
+            "disabled": true,
+            "aggregations": [{ "expression": "sum(preflight.cost_usd)" }],
+            "filter": {
+              "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+            },
+            "groupBy": [{ "name": "vcs.commit_sha", "fieldContext": "tag", "fieldDataType": "string" }],
+            "stepInterval": 60
+          }
+        },
+        {
+          "type": "builder_query",
+          "spec": {
+            "name": "B",
+            "signal": "traces",
+            "disabled": true,
+            "aggregations": [{ "expression": "count()" }],
+            "filter": {
+              "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+            },
+            "groupBy": [{ "name": "vcs.commit_sha", "fieldContext": "tag", "fieldDataType": "string" }],
+            "stepInterval": 60
+          }
+        },
+        {
+          "type": "builder_formula",
+          "spec": {
+            "name": "F1",
+            "expression": "A / B",
+            "legend": "{{vcs.commit_sha}}"
+          }
+        }
+      ]
+    },
+    "thresholds": {
+      "kind": "basic",
+      "spec": [
+        {
+          "name": "critical",
+          "op": "above",
+          "matchType": "at_least_once",
+          "target": 0.004,
+          "targetUnit": "usd",
+          "channels": ["preflight-local-webhook"]
+        }
+      ]
+    }
+  }
+}

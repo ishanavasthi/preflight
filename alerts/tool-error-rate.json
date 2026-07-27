@@ -1,0 +1,84 @@
+{
+  "alert": "Preflight - agent tool error rate",
+  "alertType": "TRACES_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "schemaVersion": "v2alpha1",
+  "description": "Fires when more than 5% of the reference agent's tool invocations end in an errored span. Tool spans are emitted by instrument.tool_span(), which sets status ERROR and records the exception when a tool raises -- so has_error = true is the agent failing to use its own tools, not the model giving a wrong answer. A healthy suite run leaves this rule quiet, which is why it is expressed as a rate rather than a raw count: one flaky call in a large run is noise, one in five is a broken tool.",
+  "labels": {
+    "severity": "error",
+    "team": "preflight",
+    "signal": "tools"
+  },
+  "annotations": {
+    "summary": "{{$value}}% of tool calls are erroring on commit {{$labels.vcs_commit_sha}} (ceiling {{$threshold}}%)",
+    "description": "Tool spans with has_error = true as a percentage of all tool spans. Open the 'Preflight - Tool Trajectory' dashboard: the 'Tool errors by tool name' table names the failing tool, and 'Tool calls by tool and commit' shows whether the trajectory changed at the same time."
+  },
+  "preferredChannels": ["preflight-local-webhook"],
+  "evaluation": {
+    "kind": "rolling",
+    "spec": {
+      "evalWindow": "30m",
+      "frequency": "1m"
+    }
+  },
+  "condition": {
+    "selectedQueryName": "F1",
+    "alertOnAbsent": false,
+    "compositeQuery": {
+      "queryType": "builder",
+      "panelType": "graph",
+      "unit": "percent",
+      "queries": [
+        {
+          "type": "builder_query",
+          "spec": {
+            "name": "A",
+            "signal": "traces",
+            "disabled": true,
+            "aggregations": [{ "expression": "count()" }],
+            "filter": {
+              "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'tool' AND has_error = true"
+            },
+            "groupBy": [{ "name": "vcs.commit_sha", "fieldContext": "tag", "fieldDataType": "string" }],
+            "stepInterval": 60
+          }
+        },
+        {
+          "type": "builder_query",
+          "spec": {
+            "name": "B",
+            "signal": "traces",
+            "disabled": true,
+            "aggregations": [{ "expression": "count()" }],
+            "filter": {
+              "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'tool'"
+            },
+            "groupBy": [{ "name": "vcs.commit_sha", "fieldContext": "tag", "fieldDataType": "string" }],
+            "stepInterval": 60
+          }
+        },
+        {
+          "type": "builder_formula",
+          "spec": {
+            "name": "F1",
+            "expression": "A / B * 100",
+            "legend": "{{vcs.commit_sha}}"
+          }
+        }
+      ]
+    },
+    "thresholds": {
+      "kind": "basic",
+      "spec": [
+        {
+          "name": "error",
+          "op": "above",
+          "matchType": "at_least_once",
+          "target": 5,
+          "targetUnit": "percent",
+          "channels": ["preflight-local-webhook"]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,506 @@
+{
+  "name": "preflight-cost-per-task",
+  "schemaVersion": "v6",
+  "tags": [
+    {
+      "key": "project",
+      "value": "preflight"
+    },
+    {
+      "key": "managed-by",
+      "value": "signoz-apply"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "Preflight - Cost per Task by Commit",
+      "description": "The gated metric, and the arithmetic behind it. Cost per task = total LLM cost divided by the number of golden cases, which is exactly what preflight diff compares."
+    },
+    "duration": "1h",
+    "refreshInterval": "1m",
+    "variables": [],
+    "panels": {
+      "cost_per_task": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Cost per task by commit (USD)",
+            "description": "Formula A/B: A = sum(preflight.cost_usd) over LLM spans, B = count() over case spans, both grouped by commit. This is the number in the PR comment."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "usd",
+                "decimalPrecision": "4"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "F1",
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "traces",
+                          "disabled": false,
+                          "aggregations": [
+                            {
+                              "expression": "sum(preflight.cost_usd)",
+                              "alias": "cost_usd"
+                            }
+                          ],
+                          "filter": {
+                            "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "vcs.commit_sha",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "legend": "",
+                          "stepInterval": "60s"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "traces",
+                          "disabled": false,
+                          "aggregations": [
+                            {
+                              "expression": "count()",
+                              "alias": "cases"
+                            }
+                          ],
+                          "filter": {
+                            "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "vcs.commit_sha",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "legend": "",
+                          "stepInterval": "60s"
+                        }
+                      },
+                      {
+                        "type": "builder_formula",
+                        "spec": {
+                          "name": "F1",
+                          "expression": "A / B",
+                          "legend": "{{vcs.commit_sha}}"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cost_per_case_table": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Cost per case, per commit (USD)",
+            "description": "sum(preflight.cost_usd) grouped by commit and case. The per-case breakdown behind the headline average -- use it to find which case got expensive."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "4",
+                "columnUnits": {
+                  "cost_usd": "usd"
+                }
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "sum(preflight.cost_usd)",
+                        "alias": "cost_usd"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      },
+                      {
+                        "name": "eval.case_id",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "tokens_per_task": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tokens per task by commit",
+            "description": "Formula (A+B)/C: input + output tokens divided by case count. Tokens move with cost by construction, but they are the honest unit when prices change."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "F1",
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "traces",
+                          "disabled": false,
+                          "aggregations": [
+                            {
+                              "expression": "sum(gen_ai.usage.input_tokens)",
+                              "alias": "input_tokens"
+                            }
+                          ],
+                          "filter": {
+                            "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "vcs.commit_sha",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "legend": "",
+                          "stepInterval": "60s"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "traces",
+                          "disabled": false,
+                          "aggregations": [
+                            {
+                              "expression": "sum(gen_ai.usage.output_tokens)",
+                              "alias": "output_tokens"
+                            }
+                          ],
+                          "filter": {
+                            "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "vcs.commit_sha",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "legend": "",
+                          "stepInterval": "60s"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "C",
+                          "signal": "traces",
+                          "disabled": false,
+                          "aggregations": [
+                            {
+                              "expression": "count()",
+                              "alias": "cases"
+                            }
+                          ],
+                          "filter": {
+                            "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'case'"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "vcs.commit_sha",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "legend": "",
+                          "stepInterval": "60s"
+                        }
+                      },
+                      {
+                        "type": "builder_formula",
+                        "spec": {
+                          "name": "F1",
+                          "expression": "(A + B) / C",
+                          "legend": "{{vcs.commit_sha}}"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cost_by_model": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Cost share by model",
+            "description": "sum(preflight.cost_usd) grouped by gen_ai.response.model. One model today; the panel exists so a model swap in a PR is visible as a shape change."
+          },
+          "plugin": {
+            "kind": "signoz/PieChartPanel",
+            "spec": {
+              "formatting": {
+                "unit": "usd",
+                "decimalPrecision": "4"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "sum(preflight.cost_usd)",
+                        "alias": "cost_usd"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "gen_ai.response.model",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "llm_turns": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "LLM turns per commit",
+            "description": "count() over LLM spans. Turn count is the cost multiplier: a dependency chain that forces sequential turns re-sends the transcript every turn."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "count()",
+                        "alias": "llm_turns"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{vcs.commit_sha}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cost_headline": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Total LLM cost in window (USD)",
+            "description": "Ungrouped sum across every preflight run in the dashboard's time range."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "formatting": {
+                "unit": "usd",
+                "decimalPrecision": "4"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "sum(preflight.cost_usd)",
+                        "alias": "cost_usd"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'llm'"
+                    },
+                    "groupBy": [],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Preflight - Cost per Task by Commit",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/cost_per_task"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/cost_per_case_table"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/tokens_per_task"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/cost_by_model"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/llm_turns"
+              }
+            },
+            {
+              "x": 6,
+              "y": 12,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/cost_headline"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,408 @@
+{
+  "name": "preflight-tool-trajectory",
+  "schemaVersion": "v6",
+  "tags": [
+    {
+      "key": "project",
+      "value": "preflight"
+    },
+    {
+      "key": "managed-by",
+      "value": "signoz-apply"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "Preflight - Tool Trajectory",
+      "description": "Which tools the agent called and how that shape changed between commits. A PR that swaps a tool description shows up here before it shows up in the invoice."
+    },
+    "duration": "1h",
+    "refreshInterval": "1m",
+    "variables": [],
+    "panels": {
+      "calls_by_tool": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tool calls by tool name",
+            "description": "count() over tool spans grouped by the GenAI semconv attribute gen_ai.tool.name."
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "formatting": {
+                "unit": "",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "count()",
+                        "alias": "tool_calls"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'tool'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "gen_ai.tool.name",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "calls_by_tool_commit": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tool calls by tool and commit",
+            "description": "The trajectory breakdown: same tools, different mix per commit. This is the table that names *which* tool a regression added."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "count()",
+                        "alias": "tool_calls"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'tool'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      },
+                      {
+                        "name": "gen_ai.tool.name",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "tool_calls_over_time": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tool calls per commit",
+            "description": "count() over tool spans grouped by commit."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "count()",
+                        "alias": "tool_calls"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'tool'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{vcs.commit_sha}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "retrieval_hops": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Retrieval hops per commit",
+            "description": "count() over retrieval spans. The seeded regression adds a hop by making one tool's input depend on another tool's output."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "formatting": {
+                "unit": "",
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "count()",
+                        "alias": "retrieval_hops"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'retrieval'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "{{vcs.commit_sha}}",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "tool_errors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tool errors by tool name",
+            "description": "Tool spans with has_error = true. This is the series the tool-error-rate alert watches; a healthy suite leaves it empty."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "count()",
+                        "alias": "tool_errors"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'tool' AND has_error = true"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "vcs.commit_sha",
+                        "fieldContext": "attribute"
+                      },
+                      {
+                        "name": "gen_ai.tool.name",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "tool_result_bytes": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Mean tool result size by tool (bytes)",
+            "description": "avg(preflight.tool.result_bytes). A tool that starts returning more context raises cost on every subsequent turn without adding a call."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "formatting": {
+                "decimalPrecision": "2",
+                "columnUnits": {
+                  "avg_bytes": "bytes"
+                }
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "disabled": false,
+                    "aggregations": [
+                      {
+                        "expression": "avg(preflight.tool.result_bytes)",
+                        "alias": "avg_bytes"
+                      }
+                    ],
+                    "filter": {
+                      "expression": "attribute.eval.run_id EXISTS AND attribute.preflight.span_role = 'tool'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "gen_ai.tool.name",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "legend": "",
+                    "stepInterval": "60s"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Preflight - Tool Trajectory",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/calls_by_tool"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/calls_by_tool_commit"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/tool_calls_over_time"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/retrieval_hops"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/tool_errors"
+              }
+            },
+            {
+              "x": 6,
+              "y": 12,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/tool_result_bytes"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
