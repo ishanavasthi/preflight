@@ -87,9 +87,17 @@ make m6-check                            # the diagnosis agent — no API key ne
 
 `make` on its own lists every target.
 
-> **`make m6-check` and `make ci-local` cost nothing.** Model responses are
-> recorded as cassettes and committed, so both replay offline and byte-identically
-> with `ANTHROPIC_API_KEY` unset — which is the state you're in after cloning.
+> **`make ci-local` costs nothing.** The agent's model responses are recorded as
+> cassettes and committed, so it replays offline and byte-identically with
+> `ANTHROPIC_API_KEY` unset — which is the state you're in after cloning.
+>
+> **`make m6-check` is best-effort, and `make m6-check-live` (~$0.05) is the one
+> that always works.** The diagnosis agent's transcript embeds live SigNoz
+> results, so its cassette only replays when SigNoz holds the same data it was
+> recorded against. On your own stack, with your own runs, it usually won't — you
+> get an explicit cassette-miss error rather than a wrong answer. Non-determinism
+> is inherent here: the investigation is a real conversation with a live
+> datastore, which is also the reason it is worth watching.
 
 ---
 
@@ -103,7 +111,7 @@ make m6-check                            # the diagnosis agent — no API key ne
 | **The gate** | `preflight diff --baseline <sha> --candidate <sha>` — six metrics, thresholds in `preflight.yaml`, non-zero exit on breach. |
 | **CI** | `.github/workflows/preflight.yml` stands the whole stack up **inside the job**, resolves the baseline from the merge base, and posts a sticky PR comment. |
 | **Dashboards & alerts** | 4 dashboards, 2 alert rules, in `dashboards/` and `alerts/`, applied idempotently **through the SigNoz MCP server**. Written against the **v6 dashboard schema**, which renders only under `use_dashboard_v2` — `casting.yaml` turns that flag on, so a fresh `foundryctl cast` gets it. |
-| **Diagnosis agent** | Given a failed gate, investigates over MCP and explains it in English — and its own investigation is a 22-span trace in SigNoz. |
+| **Diagnosis agent** | Given a failed gate, investigates over MCP and explains it in English — and its own investigation is a ~two-dozen-span trace in SigNoz. |
 
 ### The full circle
 
@@ -120,10 +128,11 @@ They exist only as span attributes — so quoting them is proof it went to SigNo
 and came back. That is also what `make m6-check` asserts, which is why it is a
 real check and not a fluency test.
 
-Its own investigation lands in SigNoz as a 22-span trace under service
+Its own investigation lands in SigNoz as a trace under service
 `preflight-diagnose` — a root `diagnose regression` span, its LLM turns, and one
-span per MCP call. `make m6-check` prints the trace URL it just produced; open
-it.
+span per MCP call. That comes to roughly two dozen spans; the exact count moves
+with how many queries the agent decides to run (22 and 25 in two recent runs).
+`make m6-check-live` prints the trace URL it just produced; open it.
 
 An agent debugging an agent, both observable in the same place.
 

@@ -139,8 +139,8 @@ traces over the **SigNoz MCP server** and explains what happened in English:
 > $0.00246 to $0.00946 (+284%), tokens from 2,016 to 7,116 (+253%)… the candidate
 > now calls `policy_search` … Retrieval hops to policy-kb doubled from 6 to 14.
 
-And it is itself instrumented, so its investigation lands in SigNoz as a 22-span
-trace. One failed gate produces the agent's traces, the gate's queries against
+And it is itself instrumented, so its investigation lands in SigNoz as a trace of
+its own — a couple of dozen spans, one per reasoning turn and one per query. One failed gate produces the agent's traces, the gate's queries against
 them, and the diagnosis agent's own reasoning — all in one place. An agent
 debugging an agent, both observable.
 

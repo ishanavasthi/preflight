@@ -110,8 +110,11 @@ gate.
 
 **Full circle.** The diagnosis agent is instrumented into SigNoz itself. A single
 failed gate produces: the agent-under-test's traces, the gate's queries against
-them, and a 22-span trace of the diagnosis agent investigating — all in one
-place. `make m6-check` reproduces this offline and prints the trace URL.
+them, and a ~two-dozen-span trace of the diagnosis agent investigating — all in
+one place. `make m6-check-live` reproduces this and prints the trace URL (~$0.05;
+the offline `make m6-check` replays only when SigNoz holds the same data the
+cassette was recorded against, and fails loudly rather than guessing when it
+doesn't).
 
 ### Things we did not reach
 

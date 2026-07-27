@@ -4,6 +4,45 @@ Newest first.
 
 ---
 
+## 2026-07-27 — Two more claims that didn't survive being checked properly
+
+**What changed.** README, `SUBMISSION.md` and the blog post corrected on two
+points; `VIDEO_SCRIPT.md` rewritten around what is visible rather than what is
+architecturally interesting.
+
+**`make m6-check` does not reliably replay.** The README said it "costs nothing"
+and replays offline like `make ci-local`. That is true of `ci-local` — the agent's
+cassettes key off prompts that never change. It is *not* true of the diagnosis
+agent: its transcript embeds live SigNoz results, so the cassette only hits when
+SigNoz holds the data it was recorded against. It replayed five times this
+morning and then stopped, because the stack restarted and the underlying runs
+aged. Worth noting the failure is loud and self-describing — the error names the
+missing key and explains why investigations aren't deterministic — so this cost
+five minutes, not an hour. `make m6-check-live` (~$0.05) is now the documented
+path.
+
+**"A 22-span trace" was a measurement, not a property.** A live run produced 25.
+The span count moves with how many queries the agent decides to run, which is the
+whole point of it being an agent. Corrected to "roughly two dozen" in all four
+places it appeared. Any number lifted from one run and written down as a fact
+needs to be either pinned or hedged.
+
+**Gotcha — `/api/v1/traces/{id}` returns 200 for traces that don't exist.** SPA
+catch-all again. I used it to "verify" that traces still resolved after the
+restart and got a green light that meant nothing; three trace IDs from the CI
+comment returned 200 while ClickHouse had zero rows for them. The honest check is
+`SELECT count() FROM signoz_traces.distributed_signoz_index_v3 WHERE trace_id=…`.
+Third time this deployment's HTML fallback has manufactured a false positive —
+after the auth endpoints in M1 and the feature-flag writes earlier today.
+
+**Takeaway.** On this stack, an HTTP 200 is not evidence. Any check that can be
+satisfied by the SPA fallback has to assert on *content* — a parsed field, a row
+count — or it is not a check. Worth generalising: when a system has a catch-all
+route, status codes stop carrying information for every endpoint, not just the
+ones you got burned on.
+
+---
+
 ## 2026-07-27 — The dashboards were invisible, and the API said they were fine
 
 **What changed.** `casting.yaml` now sets
