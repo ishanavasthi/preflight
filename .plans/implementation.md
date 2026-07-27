@@ -7,10 +7,10 @@
 | M1 | Walking skeleton — Foundry up, one instrumented trace, read back via query API | **Done** — check passed |
 | M2 | Golden suite + full instrumentation | **Done** — check passed (two SHAs, one query grouped by `vcs.commit_sha`, two rows with different token totals) |
 | M3 | Differ + gate | **Done** — check passed (exit 1 with the cost delta named, exit 0 on a clean re-run; regression proven with synthetic runs through real SigNoz, see DECISIONS.md) |
-| M4 | GitHub Action + PR comment (*demo complete here*) | **Built** — validated locally end to end (`make ci-local` exits 1, all 6 deep links resolve); awaiting the real PR, which the human opens |
+| M4 | GitHub Action + PR comment (*demo complete here*) | **Done** — check passed on real GitHub Actions. PR [#1](https://github.com/ishanavasthi/preflight/pull/1) goes red for the right reason: every infra step green, both suite runs green, `Fail the check on a breach` the only failure, comment rendered with 5 breached metrics. Locally `make ci-local` exits 1 with all 6 deep links resolving |
 | M5 | Dashboards + alerts as code | **Done** — check passed (dashboard deleted, `make signoz-apply` restored it byte-identically; 27/27 panel queries return real data) |
 | M6 | Diagnosis agent over MCP | **Done** — check passed (gate fails, the explanation names `damaged-item` +284% cost and cites `policy_search`/`policy-kb`, which exist only in spans; the investigation is itself a 22-span trace, live example `c4696bb3c183db783f8260f748eb21e9`) |
-| M7 | Ship — README, video, blog, submission form | Not started |
+| M7 | Ship — README, video, blog, submission form | **Mostly done** — README rewritten to open with the problem, `SUBMISSION.md` (form answers + shot-by-shot video plan) and the blog post written and pushed. Remaining: record the video and submit the form, both of which are the human's to do |
 
 ## What is built
 
