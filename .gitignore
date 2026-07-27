@@ -15,4 +15,12 @@ uv.lock
 .preflight-spend.json
 
 # Recorded LLM responses for replay mode. Committed intentionally (see M2).
-# .cassettes/ is NOT ignored.
+# .cassettes/ is NOT ignored -- CI runs with PREFLIGHT_REPLAY=1 and no API key,
+# so removing it breaks the gate on every pull request.
+
+# Submission production artefacts: a shot list and a draft of the form answers.
+# Nothing in the repo references either, and neither is evidence of anything.
+# BUILD_PLAN.md and DECISIONS.md stay committed -- the README cites BUILD_PLAN
+# as unedited-since-kickoff, and git history is what makes that checkable.
+VIDEO_SCRIPT.md
+SUBMISSION.md
