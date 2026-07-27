@@ -40,6 +40,10 @@ env:
   # this is what makes replaying the older baseline tree possible at all.
   PREFLIGHT_CASSETTES: ${{ github.workspace }}/.cassettes
   COMPOSE: pours/deployment/compose.yaml
+  # A 2-core runner writing to a cold ClickHouse is far slower than a warm
+  # laptop, where ingest settles in 2-4s. Raised rather than shortened, per the
+  # ingest-lag risk in BUILD_PLAN.
+  PREFLIGHT_INGEST_TIMEOUT: "300"
 
 jobs:
   gate:
@@ -107,6 +111,26 @@ jobs:
       - name: Bootstrap SigNoz credentials
         run: |
           ./scripts/bootstrap_signoz.sh
+
+      # A 200 from /api/v1/health means the SigNoz *API* is up -- it says
+      # nothing about whether the collector can write to ClickHouse. On a cold
+      # deployment the collector fetches its config over opamp shortly after
+      # boot and restarts, and everything exported during that window is
+      # accepted over OTLP and then dropped. That is what broke the first CI
+      # run: 0/32 spans while every health check stayed green.
+      #
+      # So gate on the property we actually depend on -- a probe span written
+      # and then read back through the query API.
+      - name: Wait for the telemetry pipeline to persist a span
+        run: |
+          set -a; . ./.env; set +a
+          uv run python scripts/wait_for_pipeline.py --timeout 300 || {
+            echo "::error title=Telemetry pipeline never became ready::OTLP accepted spans but none reached ClickHouse. This is an infrastructure failure, not an agent regression."
+            docker compose -f "$COMPOSE" ps
+            docker compose -f "$COMPOSE" logs --tail 100 ingester
+            docker compose -f "$COMPOSE" logs --tail 50 signoz-telemetrystore-clickhouse-0-0
+            exit 1
+          }
           # Export the minted key to every later step. Masked so no unrelated
           # command can echo it into the log.
           key=$(grep '^SIGNOZ_API_KEY=' .env | cut -d= -f2-)

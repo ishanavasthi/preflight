@@ -60,7 +60,12 @@ def load(path: str | Path | None = None) -> Config:
             "OTEL_EXPORTER_OTLP_ENDPOINT", otel.get("endpoint", "http://localhost:4318")
         ).rstrip("/"),
         service_name=os.getenv("OTEL_SERVICE_NAME", otel.get("service_name", "preflight-agent")),
-        poll_timeout_seconds=int(ingest.get("poll_timeout_seconds", 120)),
+        # A cold CI deployment ingests far slower than a warm laptop, so the
+        # timeout is overridable. Per BUILD_PLAN's ingest-lag risk, the response
+        # to a timeout is to raise this and say so -- never to shorten it.
+        poll_timeout_seconds=int(
+            os.getenv("PREFLIGHT_INGEST_TIMEOUT", ingest.get("poll_timeout_seconds", 120))
+        ),
         poll_interval_seconds=float(ingest.get("poll_interval_seconds", 2)),
         models={
             name: ModelPrice(
