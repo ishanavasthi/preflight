@@ -7,7 +7,8 @@ knowing any Python.
 
 ## What the video has to land
 
-1. Someone rewrote an agent's instructions. Every test passed.
+1. Someone rewrote an agent's instructions. No code changed shape, so no linter
+   and no unit test has anything to say about it.
 2. Preflight ran the agent's real tasks on both sides of the PR and blocked it — **cost per task up 150%**.
 3. The trace shows *exactly* the steps the new instructions asked for. Cause in the diff, effect in the trace.
 
@@ -70,8 +71,8 @@ in a wall of JSON.
 
 ## Scene 1 — the change · 0:00–0:32 · window 1
 
-**On screen:** the red/green diff of the agent's instructions. Scroll slowly
-enough that the green block is readable. Then scroll down to the green check marks.
+**On screen:** the red/green diff of the agent's instructions, and nothing else.
+Scroll slowly enough that the green block is readable, then hold on it.
 
 > "This is a customer-support agent, and this pull request makes it more careful.
 > The change is just the agent's instructions — plain English, not code."
@@ -82,9 +83,17 @@ enough that the green block is readable. Then scroll down to the green check mar
 > one step at a time. Search the policy. Look up the order. Check inventory.
 > Search the policy again. Then list every option."
 
-*(scroll to the green checks)*
+*(stay on the diff — do not scroll anywhere else)*
 
-> "Tests pass. I'd approve this."
+> "No function changed. No signature changed. There is nothing here for a linter
+> or a unit test to catch — which is exactly why this kind of change ships."
+
+> ⚠️ **There are no green checks on this PR — don't go looking for them.** The
+> only check on PR #1 is `Agent regression gate`, and it is red. Scene 1 stays on
+> the diff the entire time; the first check you show is the failing one, in scene
+> 2. An earlier version of this script told you to scroll to green check marks and
+> say "tests pass" — that was wrong twice over: they aren't on the Files-changed
+> tab, and this repo has no unit tests to pass.
 
 ---
 
