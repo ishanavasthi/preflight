@@ -9,3 +9,14 @@ spec:
   mcp:
     spec:
       enabled: true
+  signoz:
+    spec:
+      env:
+        # Our committed dashboards in dashboards/ use the v6 dashboard schema
+        # (spec.panels + spec.layouts with $ref). Only the DashboardPageV2 UI
+        # renders that schema, and it sits behind this flag -- with the flag off
+        # the legacy page looks for data.widgets, finds nothing, and shows the
+        # "Welcome to your new dashboard" empty state even though the API has
+        # every panel. Underscores inside a flag name are doubled in the env var
+        # form (see SIGNOZ_FLAGGER_CONFIG_BOOLEAN_USE__SPAN__METRICS upstream).
+        SIGNOZ_FLAGGER_CONFIG_BOOLEAN_USE__DASHBOARD__V2: "true"

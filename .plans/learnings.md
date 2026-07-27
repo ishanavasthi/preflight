@@ -4,6 +4,57 @@ Newest first.
 
 ---
 
+## 2026-07-27 — The dashboards were invisible, and the API said they were fine
+
+**What changed.** `casting.yaml` now sets
+`SIGNOZ_FLAGGER_CONFIG_BOOLEAN_USE__DASHBOARD__V2=true` on the signoz component,
+and `scripts/signoz_apply.py` allowlists one more legitimately-empty panel.
+
+**The bug.** Opening a committed dashboard in the SigNoz UI showed *"Welcome to
+your new dashboard"* — blank title, zero panels, the brand-new-dashboard empty
+state. Every API check said otherwise: all four dashboards present, six panels
+each, one titled layout with six grid items, and 26/27 panel queries returning
+rows. The data was never the problem.
+
+Our dashboards use the **v6 dashboard schema** (`spec.panels` + `spec.layouts`
+with `$ref` pointers). Only the `DashboardPageV2` frontend renders that schema,
+and it sits behind the `use_dashboard_v2` feature flag, which ships **off**. With
+the flag off the legacy page looks for `data.widgets` / `data.title`, finds
+neither, and renders the empty state. The flag is read-only over HTTP (every
+write attempt returned the SPA's HTML catch-all — the same trap as the auth
+endpoints in M1) and is set through `flagger` config instead. Underscores inside
+a flag name are **doubled** in the env-var form, which is not guessable:
+`SIGNOZ_FLAGGER_CONFIG_BOOLEAN_USE__DASHBOARD__V2`. Found it by grepping
+`SIGNOZ_[A-Z_]*` out of the server binary and spotting the shipped
+`..._USE__SPAN__METRICS`.
+
+**Gotcha — a shallow check passed a broken thing.** During M7 prep the dashboards
+were verified as *"4 present"* by counting rows from `/api/v1/dashboards`. That
+is true and useless. A second, wronger check followed: reading `data.title` and
+`data.widgets` off a v6 payload returned `None` and `0`, which looked like
+confirmation the dashboards were empty when it was actually the *reader* using
+v1 field names. Two checks, opposite conclusions, both wrong, because neither
+asked the question the user asks: *does it render?*
+
+**Takeaway.** The verification has to run against the surface the claim is about.
+"The API returns four dashboards" is not the claim; "a judge opens the dashboard
+and sees panels" is. Anything served through a UI needs at least one check that
+follows the same path the UI does — here, that the frontend's own `isEmpty`
+predicate (`layoutsToSections(...).length === 0`) would be false. Reading the
+shipped JS bundle's sourcemaps to find that predicate was faster than guessing,
+and it is the same move that cracked the auth API in M1: when the docs and the
+API disagree, the frontend bundle is the honest source.
+
+**Second, smaller fix.** `agent-health.json / error_spans` was failing
+`make signoz-verify-panels` for the same reason `tool_errors` was already
+allowlisted — it counts spans with `has_error = true`, and a healthy suite has
+none. A regression makes the suite *expensive*, not broken. Allowlisted with that
+reasoning written down; verify is now 27/27. Worth noting the allowlist has to
+stay explicit and annotated, or "expected empty" quietly becomes "we stopped
+looking."
+
+---
+
 ## 2026-07-27 — M7: verifying the submission claims, and a metric that looked broken
 
 **What changed.** README rewritten to open with the problem rather than the

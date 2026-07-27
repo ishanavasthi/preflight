@@ -102,7 +102,7 @@ make m6-check                            # the diagnosis agent — no API key ne
 | **Golden suite** | 6 cases in `suite/cases/`, one trace each. |
 | **The gate** | `preflight diff --baseline <sha> --candidate <sha>` — six metrics, thresholds in `preflight.yaml`, non-zero exit on breach. |
 | **CI** | `.github/workflows/preflight.yml` stands the whole stack up **inside the job**, resolves the baseline from the merge base, and posts a sticky PR comment. |
-| **Dashboards & alerts** | 4 dashboards, 2 alert rules, in `dashboards/` and `alerts/`, applied idempotently **through the SigNoz MCP server**. |
+| **Dashboards & alerts** | 4 dashboards, 2 alert rules, in `dashboards/` and `alerts/`, applied idempotently **through the SigNoz MCP server**. Written against the **v6 dashboard schema**, which renders only under `use_dashboard_v2` — `casting.yaml` turns that flag on, so a fresh `foundryctl cast` gets it. |
 | **Diagnosis agent** | Given a failed gate, investigates over MCP and explains it in English — and its own investigation is a 22-span trace in SigNoz. |
 
 ### The full circle

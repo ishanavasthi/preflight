@@ -272,6 +272,12 @@ ALLOW_EMPTY = {
         "no tool span has ever errored -- a healthy suite leaves this empty, and "
         "it is the series the tool-error-rate alert watches"
     ),
+    ("agent-health.json", "error_spans"): (
+        "same reason as tool_errors, one level up: this counts spans with "
+        "has_error = true across the whole run, and no case has ever thrown. "
+        "A regression makes the suite *expensive*, not broken, so this panel "
+        "staying empty is the signal working rather than the query being wrong"
+    ),
 }
 
 

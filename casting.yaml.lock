@@ -345,6 +345,7 @@ spec:
       config: {}
       enabled: true
       env:
+        SIGNOZ_FLAGGER_CONFIG_BOOLEAN_USE__DASHBOARD__V2: "true"
         SIGNOZ_SQLSTORE_POSTGRES_DSN: postgres://signoz:signoz@signoz-metastore-postgres-0:5432/signoz?sslmode=disable
         SIGNOZ_SQLSTORE_PROVIDER: postgres
         SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
@@ -359,6 +360,7 @@ spec:
         - ws://signoz-signoz-0:4320
       config: {}
       env:
+        SIGNOZ_FLAGGER_CONFIG_BOOLEAN_USE__DASHBOARD__V2: "true"
         SIGNOZ_SQLSTORE_POSTGRES_DSN: postgres://signoz:signoz@signoz-metastore-postgres-0:5432/signoz?sslmode=disable
         SIGNOZ_SQLSTORE_PROVIDER: postgres
         SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
