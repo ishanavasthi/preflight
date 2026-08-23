@@ -1,0 +1,152 @@
+{
+  "key": "9a0276e2cf307559c4cc5a5be4b1fa8a",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Exchanges: Exchanges are accepted within 60 days if the replacement SKU is in stock. If the replacement is backordered, we issue a refund instead.\n\nCustomer question: I want to exchange the tent from order 8841 for another Ridgeline 2P, SKU TENT-2P. Is that possible?",
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "I'll help you with that exchange request. Let me work through this step by step.\n\n**Step 1: Check the general exchange policy**",
+            "type": "text"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01LrfA8xkEG2f9EyVgu5v8os",
+            "input": {
+              "query": "exchanges policy"
+            },
+            "name": "policy_search",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": "{\"results\": [{\"title\": \"Exchanges\", \"text\": \"Exchanges are accepted within 60 days if the replacement SKU is in stock. If the replacement is backordered, we issue a refund instead.\"}]}",
+            "tool_use_id": "toolu_01LrfA8xkEG2f9EyVgu5v8os",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "**Step 2: Look up order 8841**",
+            "type": "text"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_017u2u8Pb3XVLSszUEhUpFTp",
+            "input": {
+              "order_id": "8841"
+            },
+            "name": "lookup_order",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": "{\"order_id\": \"8841\", \"status\": \"in_transit\", \"shipped_days_ago\": 20, \"carrier\": \"Northwind Freight\", \"items\": [{\"sku\": \"TENT-2P\", \"name\": \"Ridgeline 2P Tent\", \"qty\": 1}], \"total_usd\": 289.0}",
+            "tool_use_id": "toolu_017u2u8Pb3XVLSszUEhUpFTp",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Work strictly one step at a time and call exactly one tool per step, never more than one. First call policy_search for the general rule. Then call lookup_order for the order. Then call check_inventory for the SKU you found on that order. Then call policy_search once more for the specific rule that applies to that item's status. Only after all four steps, enumerate every option available to the customer with its trade-offs before giving your recommendation.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "text": "**Step 3: Check inventory for TENT-2P**",
+        "type": "text"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_01MhV7D6o6Lv8RoPcX1iYSEs",
+        "input": {
+          "sku": "TENT-2P"
+        },
+        "name": "check_inventory",
+        "type": "tool_use"
+      }
+    ],
+    "id": "msg_011CdRKyJmGWhjXy4BkmFqM5",
+    "latency_ms": 1079.861,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 1249,
+      "output_tokens": 73
+    }
+  }
+}

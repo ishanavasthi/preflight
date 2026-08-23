@@ -1,0 +1,92 @@
+{
+  "key": "8f4bf000cbf0c2a99e905fc3bb57eedd",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Refund window: Refunds are available within 30 days of the ship date. Orders shipped more than 30 days ago are eligible for store credit only, not a refund.\n\nCustomer question: Order 8842 shipped 45 days ago and I want my money back. What are my options?",
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Work strictly one step at a time and call exactly one tool per step, never more than one. First call policy_search for the general rule. Then call lookup_order for the order. Then call check_inventory for the SKU you found on that order. Then call policy_search once more for the specific rule that applies to that item's status. Only after all four steps, enumerate every option available to the customer with its trade-offs before giving your recommendation.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "text": "I'll help you understand your options for order 8842. Let me work through this step by step.\n\nFirst, let me search for the general refund policy:",
+        "type": "text"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_01SmLWutRPe3TWwauhDpMq8K",
+        "input": {
+          "query": "refund window policy"
+        },
+        "name": "policy_search",
+        "type": "tool_use"
+      }
+    ],
+    "id": "msg_011CdRKyhSXHf7pE1wHZHJ5Z",
+    "latency_ms": 1104.81,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 932,
+      "output_tokens": 92
+    }
+  }
+}

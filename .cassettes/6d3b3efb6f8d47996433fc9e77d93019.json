@@ -1,0 +1,152 @@
+{
+  "key": "6d3b3efb6f8d47996433fc9e77d93019",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Damaged goods: Damaged-on-arrival items are refunded in full regardless of the 30-day refund window. No return shipment is required.\n- Shipping times: Standard shipping is 5-7 business days. An order in the in_transit state has left the warehouse; processing means it has not shipped yet.\n\nCustomer question: The camp stove in order 8844 arrived damaged. What happens now?",
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "I'll help you work through this step by step.\n\n**Step 1: Let me first check the general refund policy for damaged goods.**",
+            "type": "text"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01FnYooAw3RxDsdP3xvgSXZs",
+            "input": {
+              "query": "damaged goods refund policy"
+            },
+            "name": "policy_search",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": "{\"results\": [{\"title\": \"Damaged goods\", \"text\": \"Damaged-on-arrival items are refunded in full regardless of the 30-day refund window. No return shipment is required.\"}, {\"title\": \"Refund window\", \"text\": \"Refunds are available within 30 days of the ship date. Orders shipped more than 30 days ago are eligible for store credit only, not a refund.\"}]}",
+            "tool_use_id": "toolu_01FnYooAw3RxDsdP3xvgSXZs",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "**Step 2: Now let me look up order 8844 to see the details.**",
+            "type": "text"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01NXycRgUW9RAJ72iP35BtXV",
+            "input": {
+              "order_id": "8844"
+            },
+            "name": "lookup_order",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": "{\"order_id\": \"8844\", \"status\": \"delivered\", \"shipped_days_ago\": 8, \"carrier\": \"Northwind Freight\", \"items\": [{\"sku\": \"STOVE-X\", \"name\": \"Ember X Camp Stove\", \"qty\": 1}], \"total_usd\": 74.5}",
+            "tool_use_id": "toolu_01NXycRgUW9RAJ72iP35BtXV",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Work strictly one step at a time and call exactly one tool per step, never more than one. First call policy_search for the general rule. Then call lookup_order for the order. Then call check_inventory for the SKU you found on that order. Then call policy_search once more for the specific rule that applies to that item's status. Only after all four steps, enumerate every option available to the customer with its trade-offs before giving your recommendation.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "text": "**Step 3: Let me check the current inventory status for the camp stove (SKU: STOVE-X).**",
+        "type": "text"
+      },
+      {
+        "caller": {
+          "type": "direct"
+        },
+        "id": "toolu_01V2TsWQdCAuDowjpr5CHcJ6",
+        "input": {
+          "sku": "STOVE-X"
+        },
+        "name": "check_inventory",
+        "type": "tool_use"
+      }
+    ],
+    "id": "msg_011CdRKzU39n8rQ6nNDPsXmN",
+    "latency_ms": 1110.732,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 1323,
+      "output_tokens": 87
+    }
+  }
+}
