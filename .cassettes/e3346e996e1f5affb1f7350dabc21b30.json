@@ -1,0 +1,123 @@
+{
+  "key": "e3346e996e1f5affb1f7350dabc21b30",
+  "request": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Relevant policy context:\n- Exchanges: Exchanges are accepted within 60 days if the replacement SKU is in stock. If the replacement is backordered, we issue a refund instead.\n\nCustomer question: I want to exchange the tent from order 8841 for another Ridgeline 2P, SKU TENT-2P. Is that possible?",
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01Jhy574qgP8Dgjzqt5Tg16s",
+            "input": {
+              "order_id": "8841"
+            },
+            "name": "lookup_order",
+            "type": "tool_use"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_0142QNWP5kW9BFPzk7oYExv5",
+            "input": {
+              "sku": "TENT-2P"
+            },
+            "name": "check_inventory",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": "{\"order_id\": \"8841\", \"status\": \"in_transit\", \"shipped_days_ago\": 20, \"carrier\": \"Northwind Freight\", \"items\": [{\"sku\": \"TENT-2P\", \"name\": \"Ridgeline 2P Tent\", \"qty\": 1}], \"total_usd\": 289.0}",
+            "tool_use_id": "toolu_01Jhy574qgP8Dgjzqt5Tg16s",
+            "type": "tool_result"
+          },
+          {
+            "content": "{\"sku\": \"TENT-2P\", \"on_hand\": 12, \"warehouse\": \"SEA-1\", \"backordered\": false}",
+            "tool_use_id": "toolu_0142QNWP5kW9BFPzk7oYExv5",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are a support agent for Northwind Outfitters. Use the tools to check facts before answering. Be warm, and if something went wrong, apologise before anything else. Answer in at most two sentences.",
+    "temperature": 0.0,
+    "tools": [
+      {
+        "description": "Look up an order by its numeric id. Returns status, ship age, items and total.",
+        "input_schema": {
+          "properties": {
+            "order_id": {
+              "description": "e.g. 8841",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_id"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_order"
+      },
+      {
+        "description": "Search the store policy knowledge base. Use for refunds, returns, exchanges, shipping and backorder rules.",
+        "input_schema": {
+          "properties": {
+            "query": {
+              "description": "What to look up.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "name": "policy_search"
+      },
+      {
+        "description": "Check stock for a SKU. Returns on_hand count and whether it is backordered.",
+        "input_schema": {
+          "properties": {
+            "sku": {
+              "description": "e.g. TENT-2P",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sku"
+          ],
+          "type": "object"
+        },
+        "name": "check_inventory"
+      }
+    ]
+  },
+  "response": {
+    "content": [
+      {
+        "text": "Great news! Yes, we can absolutely process that exchange for you. Your order 8841 was shipped 20 days ago (well within our 60-day exchange window), and the Ridgeline 2P tent (TENT-2P) is in stock with 12 units available, so we're all set to get you that replacement!",
+        "type": "text"
+      }
+    ],
+    "id": "msg_011CgFcG2G3mGLQW4f69WWTF",
+    "latency_ms": 1306.55,
+    "model": "claude-haiku-4-5-20251001",
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 1152,
+      "output_tokens": 79
+    }
+  }
+}

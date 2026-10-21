@@ -6,11 +6,19 @@ spec:
   deployment:
     flavor: compose
     mode: docker
+  # Pinned to the releases Preflight was built against. Left at :latest, a
+  # fresh stack pulls SigNoz releases whose RBAC answers the bootstrap
+  # service-account key with 403 on traces:read, so the gate reads nothing.
+  ingester:
+    spec:
+      image: signoz/signoz-otel-collector:v0.144.6
   mcp:
     spec:
       enabled: true
+      image: signoz/signoz-mcp-server:v0.9.0
   signoz:
     spec:
+      image: signoz/signoz:v0.134.0
       env:
         # Our committed dashboards in dashboards/ use the v6 dashboard schema
         # (spec.panels + spec.layouts with $ref). Only the DashboardPageV2 UI
